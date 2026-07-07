@@ -25,6 +25,7 @@
 - **跨平台**：核心功能在 Windows / macOS / Linux 均可用；Windows 额外提供系统托盘与原生文件对话框，其他平台回退到 tkinter 且无托盘。
 - **界面语言**：支持简体中文与英文，可在顶栏随时切换。
 - **Windows 系统托盘**：启动后在任务栏托盘生成图标，菜单含「打开 WebUI」「退出」。
+- **开箱即用**：前后端无需编译，安装 Python 依赖后即可运行。
 
 ### 使用方式
 
@@ -33,10 +34,14 @@
 #### Python脚本启动
 
 ```bash
-# 1) 安装依赖
+# 1) 克隆本仓库到本地
+git clone https://github.com/zhijunn/LiveCSV.git
+cd LiveCSV
+
+# 2) 安装依赖
 pip install -r requirements.txt
 
-# 2) 启动（自动选取本地端口并打开浏览器）
+# 3) 启动（自动选取本地端口并打开浏览器）
 python livecsv.py
 
 # 可选参数
@@ -108,6 +113,7 @@ LICENSE / README.md     MIT 许可证 / 项目说明
 - **Cross-platform**: core features work on Windows / macOS / Linux. Windows adds a tray icon and native file dialog; other platforms fall back to a tkinter dialog with no tray icon.
 - **UI languages**: Simplified Chinese and English, switchable anytime from the toolbar.
 - **Windows tray icon**: a tray icon appears at startup with an "Open WebUI" / "Quit" menu.
+- **Zero build**: no front-end or back-end compilation — install the Python dependencies and run.
 
 ### Quick Start
 > Requires Python 3.8+.
@@ -115,6 +121,8 @@ LICENSE / README.md     MIT 许可证 / 项目说明
 #### Run with Python
 
 ```bash
+git clone https://github.com/zhijunn/LiveCSV.git
+cd LiveCSV
 pip install -r requirements.txt
 python livecsv.py
 # python livecsv.py --port 8080 --no-browser
