@@ -1,0 +1,14 @@
+# LiveCSV — Python dependencies
+# Install:  pip install -r requirements.txt
+
+Flask>=3.0,<4.0
+
+# Native "Open file" dialog on Windows. Optional: if it is missing the app
+# automatically falls back to a manual path text-field. The marker makes pip
+# skip it on non-Windows platforms.
+pywin32>=306 ; sys_platform == "win32"
+
+# Windows system-tray icon (SPEC #13): "Open WebUI" / "Quit". Optional: if
+# absent the server still runs, just without the tray icon.
+pystray>=0.19 ; sys_platform == "win32"
+Pillow>=10 ; sys_platform == "win32"

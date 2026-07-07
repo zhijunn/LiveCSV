@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48 64x64 128x128 256x256" />
+<title>LiveCSV</title>
+<link rel="stylesheet" href="/frontend/style.css">
+</head>
+<body>
+<div id="boot"><div class="bspin"></div><div>正在加载…</div></div>
+<div id="app" v-cloak>
+  <!-- browser-native file picker (uploads a copy to the backend) -->
+  <input type="file" ref="fileInput" accept=".csv,.tsv,.txt,text/csv" style="display:none" @change="onFilePicked" />
+
+  <!-- ============ VIEW / SELECT TOOLBAR ============ -->
+  <div class="toolbar">
+    <div class="t-group">
+      <span class="file-tag" :class="{'file-tag-empty': !fileName, 'in-select': phase==='select'}"
+            @click="fileName && (phase==='select' ? backToView() : goSelect())"
+            :title="!fileName ? '' : (phase==='select' ? t('btn.back') : t('fileTag.hint'))">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        <span class="fname truncate">{{ fileName || t('fileTag.empty') }}</span>
+        <template v-if="fileName">
+          <span class="src-tag" :class="fileSource">{{ fileSource==='upload' ? t('srcTag.upload') : t('srcTag.local') }}</span>
+          <svg class="ftag-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </template>
+      </span>
+      <span class="badge live-badge" @click="toggleLiveWatch" v-if="phase==='view' && !loadingFile"
+            :title="liveWatch ? t('live.on.hint') : t('live.off.hint')">
+        <span class="dot" :class="{on: liveWatch, busy: updating}"></span>
+        <span class="live-label" :class="{off: !liveWatch}">{{ t('live.label') }}</span><span> | <b>{{ filteredCount.toLocaleString() }}</b> / {{ fileTruncated ? t('rows.unknown') : totalRows.toLocaleString() }} {{ t('rows') }}</span>
+        <span v-if="!fileTruncated && filteredCount<totalRows" style="color:var(--accent)">·{{ t('filtered') }}</span>
+      </span>
+    </div>
+    <div class="t-spacer"></div>
+    <div class="t-group">
+      <template v-if="phase==='view' && !loadingFile">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input class="focus-ring" v-model="searchInput" :placeholder="t('search.placeholder')" @keydown.esc="searchInput=''" />
+          <button class="search-clear" v-if="searchInput" @click="searchInput=''" :title="t('search.clear')">×</button>
+        </div>
+        <select class="sel" :value="delim" @change="setDelim($event.target.value)" :title="t('delim.title')">
+          <option value=",">{{ t('delim.comma') }}</option>
+          <option value=";">{{ t('delim.semicolon') }}</option>
+          <option value="&#9;">{{ t('delim.tab') }}</option>
+          <option value="|">{{ t('delim.pipe') }}</option>
+          <option value="auto">{{ t('delim.auto') }}</option>
+        </select>
+        <span class="t-divider"></span>
+        <button class="btn icon" @click="clearFilters" :title="t('btn.clearFilters')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/><path d="m18 14 4 4"/><path d="m22 14-4 4"/></svg>
+        </button>
+        <button class="btn icon" @click="resetColWidths" :title="t('btn.resetWidths')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+        </button>
+        <div class="cols-wrap">
+          <button class="btn" @click="showColsPanel=!showColsPanel">{{ t('btn.colSettings') }}</button>
+          <div class="backdrop" v-if="showColsPanel" @click="showColsPanel=false"></div>
+          <div class="panel" v-if="showColsPanel">
+            <div class="phead">
+              <b>{{ t('cols.show') }} <span class="pmuted">{{ visibleColumns.length }}/{{ columns.length }}</span></b>
+              <span class="plink" @click="showAllCols">{{ t('cols.showAll') }}</span>
+            </div>
+            <div class="phead">
+              <span class="pmuted">{{ t('cols.order') }}</span>
+              <span class="plink" @click="resetColOrder">{{ t('cols.reset') }}</span>
+            </div>
+            <div class="colrow" v-for="c in columns" :key="c.name" @click="toggleCol(c.name)">
+              <input type="checkbox" :checked="!hiddenCols[c.name]" />
+              <span class="cname truncate-pre" :class="{muted:hiddenCols[c.name]}">{{ c.name }}</span>
+            </div>
+          </div>
+        </div>
+        <span class="t-divider"></span>
+        <button class="btn icon" @click="reveal" :title="t('btn.reveal')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
+        </button>
+        <button class="btn icon" @click="openDefault" :title="t('btn.openDefault')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+        </button>
+      </template>
+      <button class="btn icon" @click="lang = lang==='zh-CN' ? 'en' : 'zh-CN'" :title="t('lang.switch')">{{ lang === 'zh-CN' ? 'EN' : '中' }}</button>
+    </div>
+  </div>
+
+  <!-- ============ STAGE ============ -->
+  <div class="stage">
+    <!-- loading -->
+    <div class="center" v-if="phase==='loading'">
+      <div class="spinner"></div>
+      <div>{{ t('loading') }}</div>
+    </div>
+
+    <!-- selection -->
+    <div class="select-wrap" v-else-if="phase==='select'">
+      <div class="card">
+        <div class="card-head">
+          <button class="btn icon back-btn" v-if="filePath" @click="backToView" :title="t('btn.back')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          </button>
+          <img class="card-logo" src="/static/icon.png" alt="LiveCSV" />
+          <h1>{{ t('select.title') }}</h1>
+          <p>{{ t('select.desc') }}</p>
+        </div>
+        <div class="card-body">
+          <div class="row-actions">
+            <button class="btn primary" @click="pickAndOpen()">{{ t('select.sysDialog') }}</button>
+            <button class="btn" @click="triggerFileInput">{{ t('btn.selectFile') }}</button>
+            <label class="open-newwin" :title="t('btn.newWindow.hint')">
+              <input type="checkbox" v-model="openInNewWindow" />{{ t('btn.newWindow') }}
+            </label>
+          </div>
+          <div class="hint-line">
+            {{ t('select.hint') }}
+          </div>
+          <div class="manual">
+            <input class="focus-ring" v-model="manualPath" :placeholder="t('select.manual.placeholder')" @keydown.enter="openPath(manualPath)" />
+            <button class="btn" @click="openPath(manualPath)" :disabled="!manualPath">{{ t('btn.open') }}</button>
+          </div>
+
+          <div class="section-title">
+            <span>{{ t('select.recent') }}</span>
+            <span class="clear-link" v-if="history.length" @click="clearHistory">{{ t('select.clearHistory') }}</span>
+          </div>
+          <div class="hist-list" v-if="history.length">
+            <div class="hist" v-for="h in history" :key="h.path" :class="{current: h.path === filePath}">
+              <div class="meta">
+                <div class="hname truncate">
+                  <span class="src-tag" :class="h.source">{{ h.source==='upload' ? t('srcTag.upload.short') : t('srcTag.local') }}</span>{{ h.name }}
+                  <span v-if="h.path === filePath" class="cur-tag">{{ t('select.current') }}</span>
+                </div>
+                <div class="hpath truncate" :title="h.path">{{ h.path }}</div>
+              </div>
+              <span class="htime">{{ fmtTime(h.openedAt * 1000) }}</span>
+              <div class="acts">
+                <button v-if="h.path === filePath" class="btn" @click="backToView">{{ t('btn.back.short') }}</button>
+                <button v-else class="btn" @click="openFile(h.path, {displayName:h.name, source:h.source})">{{ t('btn.open') }}</button>
+                <button class="btn" @click="openNewWindow(h.path, {displayName:h.name, source:h.source})">{{ t('btn.newWindow.short') }}</button>
+              </div>
+              <button class="remove-btn" @click="removeHistoryItem(h.path)" :title="t('select.removeHistory')">×</button>
+            </div>
+          </div>
+          <div class="empty-hint" v-else>{{ t('select.noHistory') }}</div>
+
+          <template v-if="samples.length">
+            <div class="section-title">{{ t('select.samples') }}</div>
+            <div class="samples">
+              <span class="chip" v-for="s in samples" :key="s" @click="openFile(s)">{{ baseName(s) }}</span>
+            </div>
+          </template>
+
+          <div class="err" v-if="error" style="margin-top:14px">⚠ {{ error }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- table -->
+    <div class="table-wrap" ref="wrapEl" @scroll="onScroll" v-show="phase==='view'">
+      <div class="grid" :style="{height: totalH+'px', width: totalWidth+'px'}">
+        <!-- header -->
+        <div class="head" :style="{width: totalWidth+'px'}">
+          <div class="hcell idx" :style="{width: IDX_W+'px'}">#</div>
+          <div class="hcell" v-for="c in visibleColumns" :key="c.name"
+               :class="{pinned: pinnedCols[c.name]}"
+               :style="{width: colWidths[c.name]+'px', background: headTint(c.index),
+                        left: pinnedCols[c.name] ? pinLefts[c.name]+'px' : null}"
+               @mousedown="onHeaderDown(c.name, $event)" :title="t('header.sortHint', {name: c.name})">
+            <div class="htitle">
+              <span class="htext truncate-pre">{{ c.name }}</span>
+              <span class="sortarrow" :class="{muted: sortCol!==c.name}">{{ sortCol===c.name ? (sortDir==='asc'?'▲':'▼') : '⇅' }}</span>
+              <button class="pinbtn" :class="{on: pinnedCols[c.name]}"
+                      @click.stop="togglePin(c.name)" @mousedown.stop
+                      :title="pinnedCols[c.name]?t('header.unpin'):t('header.pin')">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+              </button>
+              <button class="hidebtn" @click.stop="hideCol(c.name)" @mousedown.stop :title="t('header.hide')">×</button>
+            </div>
+            <div class="hfilter-wrap" @mousedown.stop>
+              <input class="hfilter" v-model="filterInputs[c.name]" :placeholder="t('header.filterPlaceholder', {name: c.name})" @keydown.enter.stop />
+              <button class="hfilter-clear" v-if="filterInputs[c.name]" @click.stop="filterInputs[c.name]=''" :title="t('search.clear')">×</button>
+            </div>
+            <span class="resizer" :title="t('header.resize')" @mousedown.stop.prevent="startResize(c.name, $event)"></span>
+          </div>
+        </div>
+        <!-- body -->
+        <div class="body" :style="{top: HEADER_H+'px', width: totalWidth+'px', height: totalBodyH+'px'}">
+          <div class="row" v-for="(vr,i) in visibleRows" :key="vr.srcIdx"
+               :class="{even: (vr.srcIdx%2)===1}"
+               :style="{top: vr.top+'px', height: vr.height+'px', width: totalWidth+'px'}">
+            <div class="cell idx" :style="{width: IDX_W+'px'}">{{ vr.srcIdx+1 }}</div>
+            <div class="cell" v-for="c in visibleColumns" :key="c.name"
+                 :class="{pinned: pinnedCols[c.name]}"
+                 :style="{width: colWidths[c.name]+'px', background: cellTint(c.index),
+                          left: pinnedCols[c.name] ? pinLefts[c.name]+'px' : null}"
+                 @click="openCell(vr.srcIdx,c)">{{ cellText(vr.srcIdx, c.index) }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="empty-table" v-if="!filteredCount">{{ t('table.noMatch') }}</div>
+    </div>
+
+    <!-- file loading overlay (inside stage so it doesn't cover the toolbar) -->
+    <div class="loading-overlay" v-if="loadingFile">
+      <div class="loading-box">
+        <div class="spinner"></div>
+        <div>{{ loadingFileSize ? t('loading.largeFile', {size: fmtSize(loadingFileSize)}) : t('loading') }}</div>
+        <button class="btn loading-cancel" @click="cancelOpen">{{ t('btn.cancel') }}</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- footer -->
+  <div class="footer-bar" v-if="phase==='view' && !loadingFile">
+    <span class="fpath truncate" :title="filePath">{{ t('footer.path') }}{{ pathDisplay }}</span>
+    <span>{{ t('footer.encoding') }}{{ encoding }}</span>
+    <span>{{ t('footer.delim') }}{{ delimLabel }}</span>
+    <span>{{ t('footer.cols', {total: columns.length, shown: visibleColumns.length}) }}</span>
+    <span>{{ t('footer.size') }}{{ fmtSize(fileSize) }}</span>
+    <span v-if="fileTruncated" class="ftrunc" :title="t('footer.truncatedHint', {size: fmtSize(totalFileSize)})">{{ t('footer.truncated', {size: fmtSize(totalFileSize)}) }}</span>
+    <span v-if="lastChecked">{{ t('footer.lastCheck') }}{{ fmtTime(lastChecked) }}</span>
+  </div>
+
+  <!-- cell detail modal -->
+  <div class="overlay" v-if="selectedCell" @click.self="selectedCell=null">
+    <div class="modal">
+      <div class="mhead">
+        <span class="mtag">{{ t('modal.row', {n: selectedCell.rowIndex}) }}</span>
+        <b>{{ selectedCell.colName }}</b>
+        <button class="xbtn" @click="selectedCell=null">×</button>
+      </div>
+      <div class="mbody">{{ selectedCell.value }}</div>
+      <div class="mfoot">
+        <button class="btn" @click="copyCell">{{ t('btn.copy') }}</button>
+        <button class="btn primary" @click="selectedCell=null">{{ t('btn.close') }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div class="toast" v-if="toastMsg">{{ toastMsg }}</div>
+</div>
+
+<script src="/static/vue.global.prod.js"></script>
+<script src="/frontend/helpers.js?v=4"></script>
+<script src="/frontend/messages.js?v=4"></script>
+<script>
+"use strict";
+
+const { createApp, ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } = Vue;
+
+createApp({
+  setup(){
+    /* ---- core state ---- */
+    const phase = ref("loading");                 // loading | select | view
+    const fileName = ref("");
+    const filePath = ref("");
+    const fileSource = ref("local");          // "local" (real file) | "upload" (browser copy)
+    const columns = ref([]);                       // [{name,index}]
+    const rows = ref([]);                          // array of arrays
+    const encoding = ref("");
+    const delim = ref(",");
+    const totalRows = ref(0);
+    const error = ref("");
+    const updating = ref(false);
+    const lastChecked = ref(null);
+    const fileTruncated = ref(false);   // file exceeded 64 MB — only head shown
+    const totalFileSize = ref(0);       // original size when truncated
+    const fileSize = ref(0);            // current file size in bytes (for footer display)
+    const loadingFile = ref(false);     // overlay shown while a large file is being opened
+    const loadingFileSize = ref(0);     // size of the file being loaded (for the overlay text)
+    const loadController = ref(null);   // AbortController for the in-flight open/data request (cancel via ESC / 取消按钮)
+    const viewDirty = ref(false);       // in-memory table data doesn't match filePath (cancel mid-render) → backToView must reload
+
+    /* ---- view state (persisted per window) ---- */
+    const colFilters = reactive({});               // name -> needle (active)
+    const filterInputs = reactive({});             // name -> raw input (v-model)
+    const hiddenCols = reactive({});               // name -> true
+    const pinnedCols = reactive({});               // name -> true (pinned left, after idx)
+    const pinPrevCol = reactive({});               // name -> col name that was immediately before it when pinned (for restore)
+    const colOverrides = reactive({});             // name -> manually resized width (px)
+    const colOrder = reactive([]);                 // column names in user-chosen display order
+    const search = ref("");                        // active full-text
+    const searchInput = ref("");                   // raw input
+    const sortCol = ref(null);
+    const sortDir = ref("asc");
+    const liveWatch = ref(true);                    // poll file for changes (SPEC: footer toggle)
+
+    /* ---- i18n ---- */
+    const _savedLang = localStorage.getItem('lang');
+    const _autoLang = (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+    const lang = ref(_savedLang || _autoLang);
+    document.documentElement.lang = lang.value;
+    const t = (key, params) => {
+      let msg = (MESSAGES[lang.value] && MESSAGES[lang.value][key]) || MESSAGES['zh-CN'][key] || key;
+      if (params) for (const k in params) msg = msg.replaceAll('{'+k+'}', params[k]);
+      return msg;
+    };
+    watch(lang, (v) => { localStorage.setItem('lang', v); document.documentElement.lang = v; });
+
+    /* ---- open-in-new-window preference (persisted) ---- */
+    const openInNewWindow = ref(localStorage.getItem('openNewWindow') === '1');
+    watch(openInNewWindow, (v) => { localStorage.setItem('openNewWindow', v ? '1' : '0'); });
+
+    /* ---- ui ---- */
+    const selectedCell = ref(null);
+    const showColsPanel = ref(false);
+    const toastMsg = ref("");
+    const manualPath = ref("");
+    const history = ref([]);
+    const samples = ref([]);
+    const scrollTop = ref(0);
+    const viewportH = ref(600);
+    const viewportW = ref(1200);
+    const wrapEl = ref(null);
+    const fileInput = ref(null);
+    let ro = null, rafId = null, toastT = null, pollT = null, syncT = null;
+    let lastMetaMtime = null, lastMetaSize = null;   // last-seen file signature (polling)
+
+    /* ---------- derived: widths & line counts ---------- */
+    // Auto-width for the leading "#" (row-number) column based on digit count.
+    // tabular-nums digits ≈ 8px at 12.5px font; +24px padding/min margin.
+    const IDX_W = computed(() => {
+      const n = Math.max(totalRows.value, rows.value.length, 1);
+      const digits = String(n).length;
+      return Math.max(48, digits * 8 + 24);
+    });
+    const colWidths = computed(() => {
+      const cols = columns.value, R = rows.value, W = {};
+      const sample = R.length > 60000 ? R.slice(0, 30000) : R;
+      for (const c of cols){
+        if (colOverrides[c.name] != null){            // user has dragged this column
+          W[c.name] = colOverrides[c.name];
+          continue;
+        }
+        const headW = Math.max(MIN_COL, Math.min(HEAD_MAX_COL, Math.ceil(dispWidth(c.name) * CHAR_PX) + PAD_X));
+        let dataMx = 0;
+        for (const row of sample){
+          const v = row[c.index];
+          if (v != null){ const dw = dispWidth(String(v)); if (dw > dataMx) dataMx = dw; }
+        }
+        const dataW = Math.max(MIN_COL, Math.min(MAX_COL, Math.ceil(dataMx * CHAR_PX) + PAD_X));
+        W[c.name] = Math.max(headW, dataW);
+      }
+      return W;
+    });
+
+    const rowLineCounts = computed(() => {
+      const R = rows.value, cols = columns.value, arr = new Array(R.length);
+      for (let i = 0; i < R.length; i++){
+        const row = R[i]; let mx = 1;
+        for (let ci = 0; ci < cols.length; ci++){
+          const v = row[cols[ci].index];
+          // CSV cells are strings, and almost none contain an embedded newline.
+          // Skip the (allocating) split unless one is actually present — this
+          // O(rows×cols) scan runs synchronously during render, so the fast path
+          // keeps first paint responsive on large files.
+          if (v != null && v.indexOf("\n") >= 0){ const n = v.split("\n").length; if (n > mx) mx = n; }
+        }
+        arr[i] = Math.min(MAXLINES, mx);
+      }
+      return arr;
+    });
+
+    const rowH = (srcIdx) => rowLineCounts.value[srcIdx] * LINE_H + PAD_Y * 2;
+
+    /* ---------- derived: filtering ---------- */
+    // columns in the user-chosen order, hidden ones removed. Columns that appear
+    // in the data but not in colOrder are appended (preserving data order).
+    const visibleColumns = computed(() => {
+      const byName = {};
+      for (const c of columns.value) byName[c.name] = c;
+      const out = [];
+      const seen = new Set();
+      for (const name of colOrder){
+        if (byName[name] && !hiddenCols[name]){ out.push(byName[name]); seen.add(name); }
+      }
+      for (const c of columns.value){
+        if (!seen.has(c.name) && !hiddenCols[c.name]) out.push(c);
+      }
+      return out;
+    });
+
+    const filtered = computed(() => {
+      const R = rows.value;
+      if (!R.length) return [];
+      const cols = columns.value, cf = colFilters;
+      const s = search.value.trim().toLowerCase();
+      const active = cols.filter(c => cf[c.name] && String(cf[c.name]).trim())
+                        .map(c => ({idx:c.index, n:String(cf[c.name]).trim().toLowerCase()}));
+      const out = [];
+      for (let i = 0; i < R.length; i++){
+        const row = R[i]; let ok = true;
+        for (let k = 0; k < active.length; k++){
+          if (!String(row[active[k].idx] ?? "").toLowerCase().includes(active[k].n)){ ok = false; break; }
+        }
+        if (ok && s){
+          let found = false;
+          for (let ci = 0; ci < cols.length; ci++){
+            if (String(row[cols[ci].index] ?? "").toLowerCase().includes(s)){ found = true; break; }
+          }
+          if (!found) ok = false;
+        }
+        if (ok) out.push(i);
+      }
+      const sc = sortCol.value;
+      if (sc != null){
+        const ci = cols.find(c => c.name === sc)?.index;
+        if (ci != null){
+          const dir = sortDir.value === "desc" ? -1 : 1;
+          out.sort((a, b) => {
+            const va = String(R[a][ci] ?? ""), vb = String(R[b][ci] ?? "");
+            let r;
+            if (va.trim() !== "" && vb.trim() !== "" && isStrictNumber(va) && isStrictNumber(vb)){
+              r = parseFloat(va) - parseFloat(vb);            // pure numbers → numeric
+            } else {
+              r = va.localeCompare(vb, "zh");                  // ISO dates/datetimes & text
+            }
+            return dir * r;
+          });
+        }
+      }
+      return out;
+    });
+
+    const cumH = computed(() => {
+      const f = filtered.value, cum = new Array(f.length + 1);
+      let acc = 0; cum[0] = 0;
+      for (let i = 0; i < f.length; i++){ acc += rowH(f[i]); cum[i + 1] = acc; }
+      return cum;
+    });
+
+    const filteredCount = computed(() => filtered.value.length);
+    const totalBodyH = computed(() => cumH.value[filtered.value.length] || 0);
+    const totalH = computed(() => HEADER_H + totalBodyH.value);
+    const totalWidth = computed(() => IDX_W.value + visibleColumns.value.reduce((s, c) => s + colWidths.value[c.name], 0));
+
+    const pinLefts = computed(() => {
+      const vis = visibleColumns.value, W = colWidths.value;
+      const map = {};
+      let acc = IDX_W.value;
+      for (const c of vis){
+        if (pinnedCols[c.name]){ map[c.name] = acc; acc += (W[c.name] || 0); }
+        else break;
+      }
+      return map;
+    });
+
+    const visibleRows = computed(() => {
+      const f = filtered.value, cum = cumH.value;
+      if (!f.length) return [];
+      const vh = viewportH.value || 400, st = scrollTop.value || 0;
+      let start = Math.max(0, lowerBound(cum, Math.max(0, st - BUFFER_PX)) - 1);
+      let end = Math.min(f.length, lowerBound(cum, st + vh + BUFFER_PX) + 1);
+      const out = [];
+      for (let i = start; i < end; i++){
+        out.push({ srcIdx:f[i], top:cum[i], height:cum[i + 1] - cum[i] });
+      }
+      return out;
+    });
+
+    const delimLabel = computed(() => {
+      const map = {",":"delim.label.comma",";":"delim.label.semicolon","\t":"delim.label.tab","|":"delim.label.pipe","auto":"delim.label.auto"};
+      return t(map[delim.value] || "delim.label.auto");
+    });
+
+    /* keep the filename (tail) visible when the path is long */
+    const pathDisplay = computed(() => {
+      const p = filePath.value || "";
+      return p.length > 64 ? "…" + p.slice(p.length - 64) : p;
+    });
+
+    /* ---------- small accessors ---------- */
+    const cellText = (srcIdx, colIndex) => String(rows.value[srcIdx]?.[colIndex] ?? "");
+    const cellTint = (i) => CELL_TINTS[i % CELL_TINTS.length];
+    const headTint = (i) => HEAD_TINTS[i % HEAD_TINTS.length];
+
+    /* ===================================================================
+       ACTIONS
+       =================================================================== */
+    function toast(msg){
+      toastMsg.value = msg;
+      clearTimeout(toastT);
+      toastT = setTimeout(() => toastMsg.value = "", 2200);
+    }
+    function toggleLiveWatch(){
+      liveWatch.value = !liveWatch.value;
+      toast(liveWatch.value ? t('live.on.toast') : t('live.off.toast'));
+    }
+
+    /* ---- scroll ---- */
+    function onScroll(e){
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        scrollTop.value = e.target.scrollTop;
+        scheduleSave(true);
+      });
+    }
+    function scrollRatio(){
+      const el = wrapEl.value;
+      return el && el.scrollHeight ? el.scrollTop / el.scrollHeight : 0;
+    }
+    function restoreScroll(ratio){
+      const el = wrapEl.value;
+      if (el && el.scrollHeight){ el.scrollTop = ratio * el.scrollHeight; scrollTop.value = el.scrollTop; }
+    }
+
+    /* ---- filter input debouncing (typing stays smooth on big files) ---- */
+    watch([filterInputs, searchInput], () => {
+      clearTimeout(syncT);
+      syncT = setTimeout(syncInputs, 140);
+    }, {deep:true});
+    function syncInputs(){
+      let changed = false;
+      const keys = new Set([...Object.keys(colFilters), ...Object.keys(filterInputs)]);
+      for (const k of keys){
+        // strip leading/trailing whitespace from the filter needle (and reflect
+        // it back into the input box so display matches the active filter)
+        const trimmed = String(filterInputs[k] || "").trim();
+        if (trimmed){
+          if (colFilters[k] !== trimmed){ colFilters[k] = trimmed; changed = true; }
+          if (filterInputs[k] !== trimmed){ filterInputs[k] = trimmed; changed = true; }
+        } else {
+          if (k in colFilters){ delete colFilters[k]; changed = true; }
+          if (filterInputs[k]){ filterInputs[k] = ""; changed = true; }
+        }
+      }
+      const s = String(searchInput.value || "").trim();
+      if (search.value !== s){ search.value = s; changed = true; }
+      if (searchInput.value !== s){ searchInput.value = s; changed = true; }
+      if (changed) scheduleSave();
+    }
+
+    /* ---- sort / columns ---- */
+    function toggleSort(name){
+      if (sortCol.value === name){
+        if (sortDir.value === "asc") sortDir.value = "desc";
+        else { sortCol.value = null; }          // third click clears
+      } else { sortCol.value = name; sortDir.value = "asc"; }
+      scheduleSave();
+    }
+    function hideCol(name){ hiddenCols[name] = true; scheduleSave(); }
+    function toggleCol(name){ if (hiddenCols[name]) delete hiddenCols[name]; else hiddenCols[name] = true; scheduleSave(); }
+    function showAllCols(){ Object.keys(hiddenCols).forEach(k => delete hiddenCols[k]); scheduleSave(); }
+    function resetColOrder(){
+      colOrder.splice(0, colOrder.length, ...columns.value.map(c => c.name));
+      Object.keys(pinnedCols).forEach(k => delete pinnedCols[k]);
+      Object.keys(pinPrevCol).forEach(k => delete pinPrevCol[k]);
+      scheduleSave();
+      toast(t('toast.resetOrder'));
+    }
+    function togglePin(name){
+      if (pinnedCols[name]){
+        // unpin: restore to original position (after the col that was before it when pinned)
+        delete pinnedCols[name];
+        const i = colOrder.indexOf(name);
+        if (i >= 0){
+          colOrder.splice(i, 1);
+          const prev = pinPrevCol[name];
+          let insertAt;
+          if (prev){
+            const pi = colOrder.indexOf(prev);
+            insertAt = pi >= 0 ? pi + 1 : colOrder.length;
+          } else {
+            // was first col before pinning: insert right after pinned region
+            insertAt = 0;
+            for (let k = 0; k < colOrder.length; k++){ if (!pinnedCols[colOrder[k]]) { insertAt = k; break; } }
+          }
+          colOrder.splice(insertAt, 0, name);
+          delete pinPrevCol[name];
+        }
+      } else {
+        // check total pinned width would not exceed viewport
+        const W = colWidths.value;
+        let pinW = IDX_W.value + (W[name] || 0);
+        for (const n in pinnedCols){ pinW += (W[n] || 0); }
+        if (pinW >= viewportW.value){
+          toast(t('toast.pinOverflow'));
+          return;
+        }
+        // record the normal col immediately before this one (for restore on unpin)
+        const ci = colOrder.indexOf(name);
+        let prev = null;
+        for (let k = ci - 1; k >= 0; k--){
+          if (!pinnedCols[colOrder[k]]){ prev = colOrder[k]; break; }
+        }
+        pinPrevCol[name] = prev;
+        pinnedCols[name] = true;
+        if (ci >= 0){
+          colOrder.splice(ci, 1);
+          let lastPin = 0;
+          for (let k = 0; k < colOrder.length; k++){ if (pinnedCols[colOrder[k]]) lastPin = k + 1; }
+          colOrder.splice(lastPin, 0, name);
+        }
+      }
+      scheduleSave();
+    }
+    function resetColWidths(){
+      Object.keys(colOverrides).forEach(k => delete colOverrides[k]);  // back to auto widths
+      scheduleSave();                                                   // clears saved colWidths too
+      toast(t('toast.resetWidths'));
+    }
+    function clearFilters(){
+      Object.keys(colFilters).forEach(k => delete colFilters[k]);
+      Object.keys(filterInputs).forEach(k => delete filterInputs[k]);
+      search.value = ""; searchInput.value = ""; sortCol.value = null;
+      scheduleSave();
+      toast(t('toast.clearFilters'));
+    }
+    async function setDelim(d){ delim.value = d; scheduleSave(); await reloadPreserving(); }
+
+    /* ---- column resize (drag the right edge of a header cell) ---- */
+    let resizeDrag = null;
+    function startResize(name, ev){
+      const cur = colWidths.value[name];
+      resizeDrag = { name, x: ev.clientX, w: (cur != null ? cur : 100) };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onResizeMove);
+      window.addEventListener("mouseup", onResizeEnd);
+    }
+    function onResizeMove(ev){
+      if (!resizeDrag) return;
+      let w = resizeDrag.w + (ev.clientX - resizeDrag.x);
+      w = Math.max(40, Math.min(1200, Math.round(w)));
+      colOverrides[resizeDrag.name] = w;
+    }
+    function onResizeEnd(){
+      if (!resizeDrag) return;
+      resizeDrag = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onResizeMove);
+      window.removeEventListener("mouseup", onResizeEnd);
+      scheduleSave();
+    }
+
+    /* ---- column reorder (drag a header cell left/right). The # column is not
+       reorderable (it is rendered separately). A click without dragging still
+       sorts (handled on mouseup). ---- */
+    let colDrag = null;
+    function onHeaderDown(name, ev){
+      if (ev.button !== 0) return;                 // left button only
+      colDrag = { name, x: ev.clientX, moved: false };
+      window.addEventListener("mousemove", onColDragMove);
+      window.addEventListener("mouseup", onColDragUp);
+    }
+    function colIndexAtX(clientX){
+      // returns the visible-column index the cursor is positioned at (for insertion)
+      const el = wrapEl.value;
+      if (!el) return -1;
+      const left = el.getBoundingClientRect ? el.getBoundingClientRect().left : 0;
+      let x = clientX - left + el.scrollLeft - IDX_W.value;
+      const cols = visibleColumns.value;
+      let acc = 0;
+      for (let i = 0; i < cols.length; i++){
+        const w = colWidths.value[cols[i].name] || 0;
+        if (x < acc + w / 2) return i;             // before this column
+        acc += w;
+      }
+      return cols.length;                          // past the end → append
+    }
+    function onColDragMove(ev){
+      if (!colDrag) return;
+      if (!colDrag.moved){
+        if (Math.abs(ev.clientX - colDrag.x) < 5) return;   // below threshold = still a click
+        colDrag.moved = true;
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+      }
+      const target = colIndexAtX(ev.clientX);
+      if (target < 0) return;
+      const vis = visibleColumns.value;
+      const visNames = vis.map(c => c.name);
+      const di = visNames.indexOf(colDrag.name);
+      if (di < 0) return;
+      // pinned region constraint: pinned cols are a prefix of visibleColumns
+      let pinnedCount = 0;
+      for (const nm of visNames){ if (pinnedCols[nm]) pinnedCount++; else break; }
+      const isPinned = !!pinnedCols[colDrag.name];
+      if (isPinned && target > pinnedCount) return;
+      if (!isPinned && target < pinnedCount) return;
+      let insertAt = target;
+      if (insertAt > di) insertAt -= 1;            // account for removal of dragged
+      if (insertAt === di) return;                 // no change
+      visNames.splice(di, 1);
+      visNames.splice(insertAt, 0, colDrag.name);
+      // rebuild colOrder: visible (new order) then hidden (preserve prior order)
+      const next = visNames.slice();
+      for (const n of colOrder){ if (!visNames.includes(n)) next.push(n); }
+      colOrder.splice(0, colOrder.length, ...next);
+    }
+    function onColDragUp(){
+      window.removeEventListener("mousemove", onColDragMove);
+      window.removeEventListener("mouseup", onColDragUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      if (colDrag && !colDrag.moved) toggleSort(colDrag.name);   // a click → sort
+      if (colDrag && colDrag.moved) scheduleSave();
+      colDrag = null;
+    }
+
+    /* ---- cell detail ---- */
+    function openCell(srcIdx, c){
+      selectedCell.value = { rowIndex:srcIdx + 1, colName:c.name, value:cellText(srcIdx, c.index) };
+    }
+    async function copyCell(){
+      try { await navigator.clipboard.writeText(selectedCell.value.value); toast(t('toast.copied')); }
+      catch (e){ toast(t('toast.copyFail')); }
+      selectedCell.value = null;
+    }
+
+    /* ===================================================================
+       STATE PERSISTENCE
+       - localStorage: per-file view state (filters, col widths, pinned
+         cols, …) keyed by filePath. Survives refresh, browser restart,
+         and is shared across windows.
+       - sessionStorage: current-session file info (phase + filePath +
+         fileName + fileSource). Survives F5 refresh but is empty in a
+         fresh tab — that's how we show the select screen on new windows.
+       =================================================================== */
+    const SESSION_KEY = "cv_session";
+    function saveSession(){
+      try {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+          phase: phase.value,
+          filePath: filePath.value,
+          fileName: fileName.value,
+          fileSource: fileSource.value,
+        }));
+      } catch (e){ /* sessionStorage unavailable — best-effort */ }
+    }
+    function loadSession(){
+      try {
+        const s = sessionStorage.getItem(SESSION_KEY);
+        return s ? JSON.parse(s) : null;
+      } catch (e){ return null; }
+    }
+    function scheduleSave(){
+      saveFileView();   // localStorage: per-file view state
+      saveSession();    // sessionStorage: current file info
+    }
+    function fileViewKey(path){ return "cv_view_" + (path || ""); }
+    function buildViewState(){
+      return {
+        filters: {...colFilters}, hiddenCols: {...hiddenCols}, colWidths: {...colOverrides},
+        pinnedCols: {...pinnedCols},
+        colOrder: colOrder.slice(),
+        search: search.value,
+        sort: sortCol.value ? {col: sortCol.value, dir: sortDir.value} : null,
+        delim: delim.value, scrollRatio: scrollRatio(),
+        liveWatch: liveWatch.value,
+      };
+    }
+    function saveFileView(){
+      if (!filePath.value) return;
+      try {
+        localStorage.setItem(fileViewKey(filePath.value), JSON.stringify(buildViewState()));
+      } catch (e){ /* localStorage unavailable — backend still works */ }
+    }
+    function loadFileView(path){
+      if (!path) return null;
+      try {
+        const s = localStorage.getItem(fileViewKey(path));
+        return s ? JSON.parse(s) : null;
+      } catch (e){ return null; }
+    }
+
+    function applyState(st){
+      if (!st) return;
+      // filters
+      clearReactive(filterInputs); clearReactive(colFilters);
+      if (st.filters) for (const k in st.filters){ filterInputs[k] = st.filters[k]; colFilters[k] = st.filters[k]; }
+      // hidden
+      clearReactive(hiddenCols);
+      if (st.hiddenCols) for (const k in st.hiddenCols) hiddenCols[k] = true;
+      // pinned
+      clearReactive(pinnedCols); clearReactive(pinPrevCol);
+      if (st.pinnedCols) for (const k in st.pinnedCols) pinnedCols[k] = true;
+      // column widths (manual overrides)
+      clearReactive(colOverrides);
+      if (st.colWidths) for (const k in st.colWidths) colOverrides[k] = st.colWidths[k];
+      // column order (reconcile against current columns)
+      if (Array.isArray(st.colOrder)){
+        const names = new Set(columns.value.map(c => c.name));
+        const ord = st.colOrder.filter(n => names.has(n));
+        for (const c of columns.value){ if (!ord.includes(c.name)) ord.push(c.name); }
+        colOrder.splice(0, colOrder.length, ...ord);
+      }
+      // enforce invariant: pinned cols are a prefix of colOrder
+      {
+        const pin = colOrder.filter(n => pinnedCols[n]);
+        const norm = colOrder.filter(n => !pinnedCols[n]);
+        colOrder.splice(0, colOrder.length, ...pin, ...norm);
+      }
+      // search / sort / delim
+      if (typeof st.search === "string"){ search.value = st.search; searchInput.value = st.search; }
+      if (st.sort){ sortCol.value = st.sort.col; sortDir.value = st.sort.dir || "asc"; }
+      if (st.delim) delim.value = st.delim;
+      if (st.source) fileSource.value = st.source;
+      if (typeof st.liveWatch === "boolean") liveWatch.value = st.liveWatch;
+    }
+
+    /* ===================================================================
+       FILE OPEN / RELOAD
+       =================================================================== */
+    async function openFile(path, opts = {}){
+      if (!path){ return; }
+      error.value = "";
+      // Snapshot the file currently open so a cancel can restore the "current"
+      // marker + back button to it. The cancelled file still enters history
+      // (the backend records it on /api/open), but the UI should land back on
+      // whatever was open before.
+      const prev = { path: filePath.value, name: fileName.value, source: fileSource.value };
+      // Abort any previous in-flight open. The overlay normally blocks
+      // re-triggering, but onMounted restore or rapid calls could overlap.
+      if (loadController.value){ loadController.value.abort(); }
+      const controller = new AbortController();
+      loadController.value = controller;
+      const signal = controller.signal;
+      try {
+        const open = await postJSON(API.open, {
+          path,
+          name: opts.displayName || null,
+          source: opts.source || "local",
+        }, { signal });
+        if (!open.ok) throw new Error(open.error || "open failed");
+        // Only show the loading overlay for files larger than 1 MB — small files
+        // load instantly and the flash would be distracting.
+        if (open.size && open.size > 1024 * 1024){
+          loadingFileSize.value = open.size;
+          loadingFile.value = true;
+        }
+        // View state to restore: explicit opts.restore wins (e.g. from onMounted);
+        // otherwise fall back to the per-file localStorage snapshot keyed by the
+        // normalized path the backend returned. This way opening from history,
+        // samples, upload, or the system dialog all restore the saved view.
+        const restore = opts.restore || loadFileView(open.path);
+        let d = (restore && restore.delim) || delim.value || ",";
+        const data = await fetchAndApply(path, d, restore && restore.encoding, signal);
+        clearReactive(colOverrides);                            // fresh open: auto widths
+        filePath.value = open.path;
+        fileName.value = opts.displayName || open.name;
+        fileSource.value = opts.source || open.source || "local";
+        delim.value = d;
+        if (restore) applyState(restore);
+        phase.value = "view";               // table starts rendering underneath the overlay
+        await nextTick();                   // expensive sync render (colWidths etc.) lands here
+        // A cancel that landed during transfer / parse / render was queued behind
+        // that work. Yield one frame so it gets dispatched; if it fired, bail back
+        // to selection without unveiling the table.
+        if (loadingFile.value){
+          await new Promise(r => setTimeout(r, 0));
+          if (signal.aborted){
+            loadingFile.value = false;
+            if (loadController.value === controller) loadController.value = null;
+            restorePrevOpen(prev, true);   // memory now holds the cancelled file's data
+            phase.value = "select";
+            await refreshHistory();
+            return;
+          }
+        }
+        loadingFile.value = false;          // unveil only once render is done & not cancelled
+        if (loadController.value === controller) loadController.value = null;
+        viewDirty.value = false;            // in-memory data now matches filePath
+        if (fileTruncated.value) toast(t('toast.fileTruncated', {size: fmtSize(totalFileSize.value)}));
+        await nextTick();
+        if (restore && restore.scrollRatio != null) restoreScroll(restore.scrollRatio);
+        await refreshHistory();
+        saveSession();
+        if (liveWatch.value) startPolling();
+      } catch (e){
+        loadingFile.value = false;
+        if (loadController.value === controller) loadController.value = null;
+        if (signal.aborted){
+          // cancelled during fetch (before applyData): memory still holds the
+          // previous file's data — just restore the file-tag markers.
+          restorePrevOpen(prev, false);
+          phase.value = "select";
+        } else {
+          toast(t('toast.openFailMsg', {msg: e.message || e}));
+          phase.value = "select";
+        }
+        await refreshHistory();
+      }
+    }
+
+    function cancelOpen(){
+      // Abort the in-flight open/data request; openFile's catch block then sees
+      // signal.aborted and returns to the file-selection screen silently.
+      if (loadController.value){ loadController.value.abort(); }
+    }
+
+    function restorePrevOpen(prev, memDirty){
+      // After cancelling an open, point the "current file" markers back at what
+      // was open before. memDirty=true means applyData already ran for the
+      // cancelled file, so the in-memory table no longer matches filePath and
+      // backToView must reload it.
+      filePath.value = prev.path || "";
+      fileName.value = prev.name || "";
+      fileSource.value = prev.source || "";
+      viewDirty.value = memDirty && !!prev.path;
+    }
+
+    async function fetchAndApply(path, d, enc, signal){
+      const params = new URLSearchParams({path, delim:d});
+      if (enc) params.set("encoding", enc);
+      const data = await getJSON(API.data + "?" + params.toString(), { signal });
+      // Large files show a cancelable overlay. The data can land in the very
+      // instant the user clicks 取消 / hits ESC — but that input is queued behind
+      // this task, so signal.aborted is still false here. Without this check the
+      // expensive synchronous applyData + view switch would run anyway and the
+      // cancel would be swallowed (the file opens regardless). Yield one frame so
+      // the pending cancel is dispatched first; if it fired, bail before applyData
+      // — openFile's catch sees signal.aborted and returns to the selection screen.
+      if (loadingFile.value && signal){
+        await new Promise(r => setTimeout(r, 0));
+        if (signal.aborted){
+          const err = new Error("cancelled");
+          err.name = "AbortError";
+          throw err;
+        }
+      }
+      applyData(data);
+      encoding.value = data.encoding;
+      totalRows.value = data.rowCount;
+      lastMetaMtime = data.mtime; lastMetaSize = data.size;
+      fileTruncated.value = !!data.truncated;
+      totalFileSize.value = data.totalSize || 0;
+      fileSize.value = data.size || 0;
+      return data;
+    }
+
+    function applyData(data){
+      const newCols = (data.columns || []).map((name, index) => ({name:String(name), index}));
+      columns.value = newCols;
+      rows.value = data.rows || [];
+      // reconcile colOrder: keep existing order, drop gone columns, append new ones
+      const names = new Set(newCols.map(c => c.name));
+      const kept = colOrder.filter(n => names.has(n));
+      for (const c of newCols){ if (!kept.includes(c.name)) kept.push(c.name); }
+      colOrder.splice(0, colOrder.length, ...kept);
+      Object.keys(pinnedCols).forEach(n => { if (!names.has(n)) delete pinnedCols[n]; });
+      Object.keys(pinPrevCol).forEach(n => { if (!names.has(n)) delete pinPrevCol[n]; });
+    }
+
+    async function reloadPreserving(){
+      if (!filePath.value) return;
+      updating.value = true;
+      const ratio = scrollRatio();
+      try {
+        const data = await fetchAndApply(filePath.value, delim.value, null);
+        await nextTick();
+        restoreScroll(ratio);
+        toast(t('toast.fileUpdated', {n: data.rowCount.toLocaleString()}));
+      } catch (e){
+        toast(t('toast.updateFail', {msg: e.message || e}));
+      } finally {
+        updating.value = false;
+      }
+    }
+
+    /* ---- real-time polling (near real-time) ---- */
+    function startPolling(){
+      stopPolling();
+      pollT = setInterval(checkUpdate, 2000);
+    }
+    function stopPolling(){ if (pollT){ clearInterval(pollT); pollT = null; } }
+    async function checkUpdate(){
+      if (!filePath.value || phase.value !== "view") return;
+      try {
+        const m = await getJSON(API.meta + "?path=" + encodeURIComponent(filePath.value));
+        lastChecked.value = Date.now();
+        if (!m.exists){ toast(t('toast.fileMissing')); return; }
+        if (m.mtime !== lastMetaMtime || m.size !== lastMetaSize){
+          lastMetaMtime = m.mtime; lastMetaSize = m.size;
+          await reloadPreserving();
+        }
+      } catch (e){ /* transient */ }
+    }
+
+    /* ===================================================================
+       SELECTION-SCREEN ACTIONS
+       =================================================================== */
+    function openNewWindow(path, opts = {}){
+      const p = new URLSearchParams();
+      p.set("path", path);
+      if (opts.displayName) p.set("name", opts.displayName);
+      if (opts.source) p.set("source", opts.source);
+      window.open(location.pathname + "?" + p.toString(), "_blank");
+    }
+
+    /* ---- browser-native picker (uploads a managed copy) ---- */
+    function triggerFileInput(){ if (fileInput.value) fileInput.value.click(); }
+    async function onFilePicked(e){
+      const file = e.target.files && e.target.files[0];
+      e.target.value = "";                       // allow re-picking the same file
+      if (!file) return;
+      await uploadAndOpen(file);
+    }
+    async function uploadAndOpen(file){
+      error.value = "";
+      try {
+        const fd = new FormData();
+        fd.append("file", file, file.name);
+        const r = await fetch(API.upload, {method:"POST", body:fd});
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || t('toast.uploadFail'));
+        liveWatch.value = false;
+        if (openInNewWindow.value) openNewWindow(j.path, {displayName:j.name, source:"upload"});
+        else await openFile(j.path, {displayName:j.name, source:"upload"});
+        toast(t('toast.uploadNoLive'));
+      } catch (e){
+        toast(t('toast.openFailMsg', {msg: e.message || e}));
+      }
+    }
+
+    /* ---- system-dialog picker (opens the real local file) ---- */
+    async function pickAndOpen(mode){
+      try {
+        const r = await postJSON(API.pick, {});
+        if (!r.path){ toast(t('toast.noFile')); return; }
+        const useNew = mode === "new" || (mode == null && openInNewWindow.value);
+        if (useNew) openNewWindow(r.path, {displayName:r.name, source:"local"});
+        else await openFile(r.path, {displayName:r.name, source:"local"});
+      } catch (e){ toast(t('toast.sysDialogFail', {msg: e.message || e})); }
+    }
+    function openPath(p){ if (p && p.trim()) openFile(p.trim(), {source:"local", displayName:baseName(p.trim())}); }
+    async function openDefault(){
+      try { const r = await postJSON(API.openNative, {path:filePath.value}); toast(r.ok ? t('toast.opened') : t('toast.openFail')); }
+      catch (e){ toast(t('toast.openFail')); }
+    }
+    async function reveal(){
+      try { const r = await postJSON(API.reveal, {path:filePath.value}); toast(r.ok ? t('toast.located') : t('toast.locateFail')); }
+      catch (e){ toast(t('toast.locateFail')); }
+    }
+    async function refreshHistory(){
+      try { history.value = (await getJSON(API.history)).history || []; } catch (e){}
+    }
+    async function clearHistory(){
+      try {
+        await postJSON(API.histClear, {});
+        // 清空历史后，当前会话可能仍记着已打开的文件（filePath），与后台已清空
+        // 的历史记录不一致。清掉会话存储并刷新页面，回到干净的「选择文件」状态。
+        try { sessionStorage.removeItem(SESSION_KEY); } catch (e){}
+        location.reload();
+      } catch (e){}
+    }
+    async function removeHistoryItem(path){
+      try {
+        await postJSON(API.histRemove, {path});
+        // 若移除的正是当前打开的文件，会话缓存仍记着它，与后台已删除的历史不一致。
+        // 清掉会话存储并刷新页面，回到干净的「选择文件」状态。
+        if (path === filePath.value){
+          try { sessionStorage.removeItem(SESSION_KEY); } catch (e){}
+          location.reload();
+          return;
+        }
+        await refreshHistory();
+        toast(t('toast.historyRemoved'));
+      } catch (e){}
+    }
+    async function loadSamples(){
+      try { samples.value = (await getJSON(API.samples)).samples || []; } catch (e){}
+    }
+    function goSelect(){ phase.value = "select"; stopPolling(); refreshHistory(); loadSamples(); saveSession(); }
+    function backToView(){
+      if (!filePath.value) return;
+      if (viewDirty.value){
+        // A previous open was cancelled mid-render: memory holds the cancelled
+        // file's data, not filePath's. Reload the current file so the view is right.
+        viewDirty.value = false;
+        openFile(filePath.value, { displayName: fileName.value, source: fileSource.value });
+      } else {
+        phase.value = "view";
+        startPolling();
+        saveSession();
+      }
+    }
+
+    /* ===================================================================
+       UTIL
+       =================================================================== */
+    function fmtTime(ts){
+      if (!ts) return "";
+      const d = new Date(ts);                       // ts is epoch ms
+      const now = new Date();
+      const sameDay = d.toDateString() === now.toDateString();
+      return sameDay ? d.toTimeString().slice(0, 5) : `${d.getMonth()+1}-${d.getDate()} ${d.toTimeString().slice(0,5)}`;
+    }
+    function fmtSize(bytes){
+      if (!bytes) return "";
+      if (bytes < 1024) return bytes + " B";
+      const units = ["KB","MB","GB","TB"];
+      let v = bytes / 1024, i = 0;
+      while (v >= 1024 && i < units.length - 1){ v /= 1024; i++; }
+      return v.toFixed(1) + " " + units[i];
+    }
+    function baseName(p){ const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return i >= 0 ? p.slice(i+1) : p; }
+    function onKey(e){
+      if (e.key === "Escape"){
+        if (loadingFile.value) cancelOpen();
+        else if (selectedCell.value) selectedCell.value = null;
+        else if (showColsPanel.value) showColsPanel.value = false;
+        else if (phase.value === "select" && filePath.value) backToView();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f"){
+        e.preventDefault();
+        const si = document.querySelector(".search input");
+        if (si){ si.focus(); if (si.value) si.select(); }
+      }
+    }
+
+    /* ===================================================================
+       LIFECYCLE
+       =================================================================== */
+    onMounted(async () => {
+      const boot = document.getElementById("boot");
+      if (boot) boot.remove();
+      try {
+        window.addEventListener("keydown", onKey);
+        await Promise.all([refreshHistory(), loadSamples()]);
+
+        const params = new URLSearchParams(location.search);
+        const explicitPath = params.get("path");
+        const explicitName = params.get("name");
+        const explicitSource = params.get("source");
+
+        // Decide what to open. Priority:
+        //   1. ?path=… in URL → open that file (open-in-new-window case).
+        //   2. sessionStorage phase="view" + filePath → restore file (F5 refresh).
+        //   3. sessionStorage phase="select" (+ filePath kept for "back" btn)
+        //      → stay on select screen.
+        //   4. sessionStorage empty → select screen (brand-new tab).
+        const sess = loadSession();
+        let path = null, name = null, source = null;
+        if (explicitPath){
+          path = explicitPath;
+          name = explicitName;
+          source = explicitSource;
+        } else if (sess && sess.phase === "view" && sess.filePath){
+          path = sess.filePath;
+          name = sess.fileName;
+          source = sess.fileSource;
+        } else if (sess && sess.phase === "select" && sess.filePath){
+          // Re-hydrate file info so the "back" button works after F5 on the
+          // select screen, but stay on select.
+          filePath.value = sess.filePath;
+          fileName.value = sess.fileName;
+          fileSource.value = sess.fileSource;
+        }
+
+        if (path){
+          const histItem = history.value.find(h => h.path === path);
+          await openFile(path, {
+            displayName: name || (histItem && histItem.name) || undefined,
+            source: source || (histItem && histItem.source) || "local",
+          });
+        }
+        if (phase.value === "loading") phase.value = "select";   // never get stuck on "loading"
+      } catch (e){
+        console.error("LiveCSV init error:", e);
+        try { await refreshHistory(); } catch(_){}
+        phase.value = "select";
+      }
+    });
+
+    watch(phase, async (p) => {
+      saveSession();   // keep session phase in sync so F5 lands on the right screen
+      if (p === "view"){
+        await nextTick();
+        const el = wrapEl.value;
+        if (el){
+          viewportH.value = el.clientHeight;
+          viewportW.value = el.clientWidth;
+          if (ro) ro.disconnect();
+          ro = new ResizeObserver(() => { viewportH.value = el.clientHeight; viewportW.value = el.clientWidth; });
+          ro.observe(el);
+        }
+      }
+    });
+
+    watch(liveWatch, (on) => {
+      if (phase.value !== "view" || !filePath.value) return;
+      if (on) startPolling(); else stopPolling();
+      scheduleSave();
+    });
+
+    onUnmounted(() => { stopPolling(); if (ro) ro.disconnect(); window.removeEventListener("keydown", onKey); });
+
+    return {
+      // state
+      phase, fileName, filePath, fileSource, columns, encoding, delim, delimLabel, totalRows,
+      error, updating, lastChecked, selectedCell, showColsPanel, toastMsg,
+      manualPath, history, samples, wrapEl, fileInput,
+      colFilters, filterInputs, hiddenCols, pinnedCols, searchInput, sortCol, sortDir, liveWatch,
+      fileTruncated, totalFileSize, fileSize, loadingFile, loadingFileSize,
+      lang, t,
+      // derived
+      visibleColumns, colWidths, pinLefts, visibleRows, filteredCount, totalBodyH, totalH, totalWidth, pathDisplay,
+      // constants
+      IDX_W, HEADER_H,
+      // accessors
+      cellText, cellTint, headTint, fmtTime, fmtSize, baseName,
+      // actions
+      onScroll, toggleSort, hideCol, toggleCol, showAllCols, clearFilters, resetColWidths, setDelim, togglePin, resetColOrder,
+      openCell, copyCell, openFile, cancelOpen, pickAndOpen, openNewWindow, openInNewWindow,
+      triggerFileInput, onFilePicked, openPath, openDefault, reveal, goSelect, backToView, clearHistory, removeHistoryItem,
+      startResize, onHeaderDown, toggleLiveWatch,
+    };
+  }
+}).mount("#app");
+</script>
+</body>
+</html>

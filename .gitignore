@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime state (per-user, regenerated automatically)
+state.json
+state.json.tmp
+livecsv.pid
+
+# Browser-uploaded file copies (managed at runtime)
+uploads/
+
+# Server run logs (archived monthly)
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.trae/
+
+# Early design drafts (internal, not part of the shipped app)
+early-design/
