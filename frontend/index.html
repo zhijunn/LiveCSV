@@ -194,7 +194,7 @@
                  :class="{pinned: pinnedCols[c.name]}"
                  :style="{width: colWidths[c.name]+'px', background: cellTint(c.index),
                           left: pinnedCols[c.name] ? pinLefts[c.name]+'px' : null}"
-                 @click="openCell(vr.srcIdx,c)">{{ cellText(vr.srcIdx, c.index) }}</div>
+                 @click="onCellClick(vr.srcIdx,c,$event)">{{ cellText(vr.srcIdx, c.index) }}</div>
           </div>
         </div>
       </div>
@@ -224,6 +224,7 @@
   </div>
 
   <!-- cell detail modal -->
+  <Transition name="modal">
   <div class="overlay" v-if="selectedCell" @click.self="selectedCell=null">
     <div class="modal">
       <div class="mhead">
@@ -238,6 +239,7 @@
       </div>
     </div>
   </div>
+  </Transition>
 
   <!-- toast -->
   <div class="toast" v-if="toastMsg">{{ toastMsg }}</div>
@@ -711,6 +713,34 @@ createApp({
       try { await navigator.clipboard.writeText(selectedCell.value.value); toast(t('toast.copied')); }
       catch (e){ toast(t('toast.copyFail')); }
       selectedCell.value = null;
+    }
+
+    /* ---- cell click: single = open detail, double = copy value ---- */
+    let cellClickTimer = null;
+    const DBLCLICK_MS = 230;
+    function onCellClick(srcIdx, c, ev){
+      if (cellClickTimer){
+        clearTimeout(cellClickTimer);
+        cellClickTimer = null;
+        copyCellDirect(srcIdx, c, ev);
+      } else {
+        cellClickTimer = setTimeout(() => {
+          cellClickTimer = null;
+          openCell(srcIdx, c);
+        }, DBLCLICK_MS);
+      }
+    }
+    async function copyCellDirect(srcIdx, c, ev){
+      const value = cellText(srcIdx, c.index);
+      if (ev && ev.currentTarget){
+        const el = ev.currentTarget;
+        el.classList.remove('cell-copied');
+        void el.offsetWidth;              // force reflow to restart animation
+        el.classList.add('cell-copied');
+        setTimeout(() => el.classList.remove('cell-copied'), 600);
+      }
+      try { await navigator.clipboard.writeText(value); toast(t('toast.copied')); }
+      catch (e){ toast(t('toast.copyFail')); }
     }
 
     /* ===================================================================
@@ -1219,7 +1249,7 @@ createApp({
       cellText, cellTint, headTint, fmtTime, fmtSize, baseName,
       // actions
       onScroll, toggleSort, hideCol, toggleCol, showAllCols, clearFilters, resetColWidths, setDelim, togglePin, resetColOrder,
-      openCell, copyCell, openFile, cancelOpen, pickAndOpen, openNewWindow, openInNewWindow,
+      openCell, copyCell, onCellClick, openFile, cancelOpen, pickAndOpen, openNewWindow, openInNewWindow,
       triggerFileInput, onFilePicked, openPath, openDefault, reveal, goSelect, backToView, clearHistory, removeHistoryItem,
       startResize, onHeaderDown, toggleLiveWatch,
     };
