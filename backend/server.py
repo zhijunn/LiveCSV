@@ -59,14 +59,20 @@ def frontend(filename):
 
 
 @app.after_request
-def _no_cache_index(resp):
-    # The frontend is under active iteration; always serve the latest
-    # index.html and our split assets so a stale browser cache can't run old
-    # (buggy) code after a refresh. Third-party assets (Vue) are left cacheable.
-    if request.path == "/" or request.path.startswith("/frontend/"):
+def _set_cache_headers(resp):
+    """Layered cache strategy:
+    - Static assets (``/``, ``/frontend/*``, ``/static/*``) → negotiated cache
+      (``no-cache``): the browser may store a copy but must revalidate via ETag
+      on each use; unchanged files get a 304 (no body), changed ones get 200.
+    - API data (``/api/*``) → never cached (``no-store``), always fresh.
+    """
+    if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
+    else:
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.make_conditional(request)   # auto-304 when ETag/Last-Modified present
     return resp
 
 

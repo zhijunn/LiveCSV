@@ -49,7 +49,7 @@
           <option value="auto">{{ t('delim.auto') }}</option>
         </select>
         <span class="t-divider"></span>
-        <button class="btn icon" @click="clearFilters" :title="t('btn.clearFilters')">
+        <button class="btn icon" @click="clearFilters" :title="t('btn.clearFilters') + ' · ' + t('shortcut.doubleEsc')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/><path d="m18 14 4 4"/><path d="m22 14-4 4"/></svg>
         </button>
         <button class="btn icon" @click="resetColWidths" :title="t('btn.resetWidths')">
@@ -81,7 +81,7 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
         </button>
       </template>
-      <button class="btn icon" @click="lang = lang==='zh-CN' ? 'en' : 'zh-CN'" :title="t('lang.switch')">{{ lang === 'zh-CN' ? 'EN' : '中' }}</button>
+      <button class="btn icon" @click="lang = lang==='zh-CN' ? 'en' : 'zh-CN'" :title="'切换语言 / Switch language'">{{ lang === 'zh-CN' ? 'EN' : '中' }}</button>
     </div>
   </div>
 
@@ -244,8 +244,8 @@
 </div>
 
 <script src="/static/vue.global.prod.js"></script>
-<script src="/frontend/helpers.js?v=4"></script>
-<script src="/frontend/messages.js?v=4"></script>
+<script src="/frontend/helpers.js"></script>
+<script src="/frontend/messages.js"></script>
 <script>
 "use strict";
 
@@ -1100,12 +1100,24 @@ createApp({
       return v.toFixed(1) + " " + units[i];
     }
     function baseName(p){ const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return i >= 0 ? p.slice(i+1) : p; }
+    let lastEscTime = 0;
     function onKey(e){
       if (e.key === "Escape"){
-        if (loadingFile.value) cancelOpen();
-        else if (selectedCell.value) selectedCell.value = null;
-        else if (showColsPanel.value) showColsPanel.value = false;
-        else if (phase.value === "select" && filePath.value) backToView();
+        // Close overlays first; reset the double-tap timer so a close + clear
+        // don't accidentally fire back-to-back.
+        if (loadingFile.value){ cancelOpen(); lastEscTime = 0; return; }
+        if (selectedCell.value){ selectedCell.value = null; lastEscTime = 0; return; }
+        if (showColsPanel.value){ showColsPanel.value = false; lastEscTime = 0; return; }
+        if (phase.value === "select" && filePath.value){ backToView(); lastEscTime = 0; return; }
+        // No overlay left to close → rapid double-tap Esc clears all filters & search.
+        const now = Date.now();
+        if (phase.value === "view" && now - lastEscTime < 350){
+          clearFilters();
+          lastEscTime = 0;
+        } else {
+          lastEscTime = now;
+        }
+        return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f"){
         e.preventDefault();
