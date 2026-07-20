@@ -530,9 +530,10 @@ createApp({
           if (filterInputs[k]){ filterInputs[k] = ""; changed = true; }
         }
       }
+      // trim only for the active search needle; leave the input box as-is so
+      // the UI keeps whatever whitespace the user typed (leading/trailing).
       const s = String(searchInput.value || "").trim();
       if (search.value !== s){ search.value = s; changed = true; }
-      if (searchInput.value !== s){ searchInput.value = s; changed = true; }
       if (changed) scheduleSave();
     }
 
