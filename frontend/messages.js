@@ -46,6 +46,11 @@ const MESSAGES = {
     'select.clearHistory':'清空','select.removeHistory':'移除此项',
     'toast.openFailMsg':'打开失败：{msg}','toast.historyCleared':'已清空历史记录','toast.historyRemoved':'已移除',
     'toast.fileTruncated':'文件过大（{size}），仅展示前 64MB 内容，性能受限',
+    'tab.new':'新建标签页（打开文件）· Ctrl+~ 切换标签','tab.close':'关闭标签页',
+    'tab.closeOthers':'关闭其他标签页','tab.closeAll':'关闭全部标签页',
+    'tab.copyPath':'复制文件路径','tab.openNewWindow':'在新窗口打开',
+    'tab.updated':'文件已更新，点击切换并刷新','tab.missing':'文件不可用（可能已被移动或删除）',
+    'toast.dupTab':'该文件已在标签页中打开，已切换过去',
   },
   'en': {
     'srcTag.upload':'Upload','srcTag.local':'Local','srcTag.upload.short':'Upload',
@@ -93,5 +98,10 @@ const MESSAGES = {
     'select.clearHistory':'Clear','select.removeHistory':'Remove this entry',
     'toast.openFailMsg':'Open failed: {msg}','toast.historyCleared':'History cleared','toast.historyRemoved':'Removed',
     'toast.fileTruncated':'File too large ({size}), showing first 64MB only — performance limited',
+    'tab.new':'New tab (open a file) · Ctrl+~ switches tabs','tab.close':'Close tab',
+    'tab.closeOthers':'Close other tabs','tab.closeAll':'Close all tabs',
+    'tab.copyPath':'Copy file path','tab.openNewWindow':'Open in new window',
+    'tab.updated':'File updated — click to switch & refresh','tab.missing':'File unavailable (moved or deleted?)',
+    'toast.dupTab':'File already open in a tab — switched to it',
   }
 };

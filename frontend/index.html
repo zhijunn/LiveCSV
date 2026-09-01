@@ -13,19 +13,27 @@
   <!-- browser-native file picker (uploads a copy to the backend) -->
   <input type="file" ref="fileInput" accept=".csv,.tsv,.txt,text/csv" style="display:none" @change="onFilePicked" />
 
-  <!-- ============ VIEW / SELECT TOOLBAR ============ -->
+  <!-- ============ VIEW / SELECT TOOLBAR (tabs inline, one per open file) ============ -->
   <div class="toolbar">
-    <div class="t-group">
-      <span class="file-tag" :class="{'file-tag-empty': !fileName, 'in-select': phase==='select'}"
-            @click="fileName && (phase==='select' ? backToView() : goSelect())"
-            :title="!fileName ? '' : (phase==='select' ? t('btn.back') : t('fileTag.hint'))">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-        <span class="fname truncate">{{ fileName || t('fileTag.empty') }}</span>
-        <template v-if="fileName">
-          <span class="src-tag" :class="fileSource">{{ fileSource==='upload' ? t('srcTag.upload') : t('srcTag.local') }}</span>
-          <svg class="ftag-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </template>
-      </span>
+    <div class="t-group t-tabs">
+      <div class="tabstrip" v-if="tabs.length" @wheel.prevent="onTabWheel">
+        <div class="tab" v-for="tb in tabs" :key="tb.id" :data-id="tb.id"
+             :class="{active: tb.id===activeTabId, missing: tb.missing && tb.id!==activeTabId}"
+             :title="tabTooltip(tb)"
+             @click="activateTab(tb.id)"
+             @auxclick.middle.prevent="closeTab(tb.id)"
+             @contextmenu.prevent="openTabMenu(tb, $event)">
+          <span class="tdot" v-if="tb.id!==activeTabId && (tb.updated || tb.missing)" :class="{miss: tb.missing}"></span>
+          <span class="tname truncate">{{ tb.name }}</span>
+          <button class="tabclose" :title="t('tab.close')" @click.stop="closeTab(tb.id)" @mousedown.stop>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <button class="tabnew" v-if="tabs.length" @click="goSelect" :title="t('tab.new')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <span class="t-divider" v-if="tabs.length"></span>
       <span class="badge live-badge" @click="toggleLiveWatch" v-if="phase==='view' && !loadingFile"
             :title="liveWatch ? t('live.on.hint') : t('live.off.hint')">
         <span class="dot" :class="{on: liveWatch, busy: updating}"></span>
@@ -136,7 +144,7 @@
               <span class="htime">{{ fmtTime(h.openedAt * 1000) }}</span>
               <div class="acts">
                 <button v-if="h.path === filePath" class="btn" @click="backToView">{{ t('btn.back.short') }}</button>
-                <button v-else class="btn" @click="openFile(h.path, {displayName:h.name, source:h.source})">{{ t('btn.open') }}</button>
+                <button v-else class="btn" @click="openFileAsTab(h.path, {displayName:h.name, source:h.source})">{{ t('btn.open') }}</button>
                 <button class="btn" @click="openNewWindow(h.path, {displayName:h.name, source:h.source})">{{ t('btn.newWindow.short') }}</button>
               </div>
               <button class="remove-btn" @click="removeHistoryItem(h.path)" :title="t('select.removeHistory')">×</button>
@@ -147,7 +155,7 @@
           <template v-if="samples.length">
             <div class="section-title">{{ t('select.samples') }}</div>
             <div class="samples">
-              <span class="chip" v-for="s in samples" :key="s" @click="openFile(s)">{{ baseName(s) }}</span>
+              <span class="chip" v-for="s in samples" :key="s" @click="openFileAsTab(s)">{{ baseName(s) }}</span>
             </div>
           </template>
 
@@ -241,6 +249,16 @@
   </div>
   </Transition>
 
+  <!-- tab right-click menu -->
+  <div class="backdrop" v-if="showTabMenu" @click="showTabMenu=false" @contextmenu.prevent="onTabMenuRetarget"></div>
+  <div class="tabmenu" v-if="showTabMenu" :style="{left: tabMenu.x+'px', top: tabMenu.y+'px'}" @contextmenu.prevent="onTabMenuRetarget">
+    <div class="tmi" @click="menuNewWindow">{{ t('tab.openNewWindow') }}</div>
+    <div class="tmi" @click="menuCopyPath">{{ t('tab.copyPath') }}</div>
+    <div class="tmi-sep"></div>
+    <div class="tmi" @click="menuCloseOthers">{{ t('tab.closeOthers') }}</div>
+    <div class="tmi danger" @click="menuCloseAll">{{ t('tab.closeAll') }}</div>
+  </div>
+
   <!-- toast -->
   <div class="toast" v-if="toastMsg">{{ toastMsg }}</div>
 </div>
@@ -274,7 +292,21 @@ createApp({
     const loadingFile = ref(false);     // overlay shown while a large file is being opened
     const loadingFileSize = ref(0);     // size of the file being loaded (for the overlay text)
     const loadController = ref(null);   // AbortController for the in-flight open/data request (cancel via ESC / 取消按钮)
-    const viewDirty = ref(false);       // in-memory table data doesn't match filePath (cancel mid-render) → backToView must reload
+
+    /* ---- multi-tab state ---- */
+    // One record per open file. The ACTIVE tab's data lives in the refs above;
+    // on switch-away syncActiveTab() copies refs (data + view + file signature)
+    // into the record and applyTabRecord() swaps them back in — no duplicate
+    // bookkeeping while a tab is being viewed.
+    let tabSeq = 1;
+    const tabs = ref([]);
+    const activeTabId = ref(null);
+    const RESIDENT_LIMIT = 3;                    // LRU: parsed data kept for the N most recently used tabs
+    const RESIDENT_BYTES = 256 * 1024 * 1024;    // safety cap on total resident data (very large files)
+    const showTabMenu = ref(false);              // tab right-click menu
+    const tabMenu = reactive({ id:null, x:0, y:0 });
+    let loadSeq = 0;                             // only the newest load may touch refs/phase; switching/cancelling invalidates older ones
+    const activeTab = computed(() => tabs.value.find(tb => tb.id === activeTabId.value) || null);
 
     /* ---- view state (persisted per window) ---- */
     const colFilters = reactive({});               // name -> needle (active)
@@ -758,9 +790,8 @@ createApp({
       try {
         sessionStorage.setItem(SESSION_KEY, JSON.stringify({
           phase: phase.value,
-          filePath: filePath.value,
-          fileName: fileName.value,
-          fileSource: fileSource.value,
+          tabs: tabs.value.map(tb => ({path: tb.path, name: tb.name, source: tb.source})),
+          activeIndex: tabs.value.findIndex(tb => tb.id === activeTabId.value),
         }));
       } catch (e){ /* sessionStorage unavailable — best-effort */ }
     }
@@ -838,108 +869,337 @@ createApp({
     /* ===================================================================
        FILE OPEN / RELOAD
        =================================================================== */
-    async function openFile(path, opts = {}){
-      if (!path){ return; }
+    /* ===================================================================
+       MULTI-TAB: open / activate / close / LRU
+       =================================================================== */
+    // Backend paths are normalized; mirror the OS separator so the dedupe
+    // lookup also matches "D:/x.csv" vs "D:\x.csv" style inputs.
+    const IS_WIN = navigator.platform.toLowerCase().includes("win");
+    function normPath(p){ return p ? p.replace(/[/\\]+/g, IS_WIN ? "\\" : "/") : p; }
+
+    function makeTab(path, name, source){
+      return {
+        id: tabSeq++,
+        path: normPath(path), name: name || baseName(path), source: source || "local",
+        rows: null, columnsArr: null,          // parsed data; null = not resident (never loaded / LRU-evicted)
+        encoding: "", totalRows: 0, fileTruncated: false, totalFileSize: 0, fileSize: 0,
+        metaMtime: null, metaSize: null,       // file signature at last data sync
+        updated: false,                        // file changed while inactive → dot on the tab
+        missing: false,                        // file was missing at the last background check
+        lastUsed: Date.now(),
+        view: null,                            // buildViewState() snapshot (seeded from localStorage for fresh tabs)
+      };
+    }
+
+    function syncActiveTab(){
+      const tb = activeTab.value;
+      if (!tb || phase.value !== "view") return;
+      tb.path = filePath.value; tb.name = fileName.value; tb.source = fileSource.value;
+      tb.rows = rows.value; tb.columnsArr = columns.value;
+      tb.encoding = encoding.value; tb.totalRows = totalRows.value;
+      tb.fileTruncated = fileTruncated.value; tb.totalFileSize = totalFileSize.value; tb.fileSize = fileSize.value;
+      tb.metaMtime = lastMetaMtime; tb.metaSize = lastMetaSize;
+      tb.view = buildViewState();
+    }
+
+    function applyTabRecord(tb){
+      filePath.value = tb.path; fileName.value = tb.name; fileSource.value = tb.source;
+      applyData({ columns: tb.columnsArr.map(c => c.name), rows: tb.rows });
+      encoding.value = tb.encoding; totalRows.value = tb.totalRows;
+      fileTruncated.value = tb.fileTruncated; totalFileSize.value = tb.totalFileSize; fileSize.value = tb.fileSize;
+      lastMetaMtime = tb.metaMtime; lastMetaSize = tb.metaSize;
+      if (tb.view) applyState(tb.view);
+    }
+
+    function invalidateLoad(){
+      // A tab switch / close makes any in-flight open or refresh irrelevant:
+      // bump the sequence (late continuations self-discard) and abort the
+      // network request so its catch block runs promptly.
+      loadSeq++;
+      if (loadController.value){ try { loadController.value.abort(); } catch (e){} loadController.value = null; }
+      loadingFile.value = false;
+    }
+
+    async function openFileAsTab(path, opts = {}){
+      if (!path) return;
+      const existing = tabs.value.find(tb => tb.path === normPath(path));
+      if (existing){
+        if (existing.id !== activeTabId.value) toast(t('toast.dupTab'));
+        activateTab(existing.id);
+        return;
+      }
+      const tb = makeTab(path, opts.displayName, opts.source);
+      const saved = opts.restore || loadFileView(tb.path);
+      if (saved) tb.view = saved;
+      tabs.value.push(tb);
+      const prevId = activeTabId.value;
+      activeTabId.value = tb.id;
+      saveSession();
+      await loadTabData(tb, { prevId, isNew: true });
+    }
+
+    async function activateTab(id){
+      const target = tabs.value.find(tb => tb.id === id);
+      if (!target) return;
+      if (id === activeTabId.value){
+        // Already active — maybe just return from the select screen.
+        if (phase.value !== "view"){
+          if (target.columnsArr){ phase.value = "view"; startPolling(); }
+          else await loadTabData(target, { prevId: null, isNew: false });
+        }
+        return;
+      }
+      invalidateLoad();
+      syncActiveTab();                          // save the tab we are leaving
+      const prevId = activeTabId.value;
+      activeTabId.value = id;
+      target.lastUsed = Date.now();
+      saveSession();
+
+      if (target.columnsArr){
+        const wasUpdated = target.updated;
+        target.updated = false;
+        applyTabRecord(target);
+        phase.value = "view";
+        await nextTick();                       // expensive sync render (colWidths etc.) lands here
+        if (target.view && target.view.scrollRatio != null) restoreScroll(target.view.scrollRatio);
+        startPolling();
+        if (wasUpdated) reloadPreserving();     // file changed while away — refresh now (spinner + toast)
+        return;
+      }
+      await loadTabData(target, { prevId, isNew: false });   // evicted → refetch with overlay
+    }
+
+    async function loadTabData(tb, opts = {}){
+      const prevId = opts.prevId != null ? opts.prevId : activeTabId.value;
+      const isNew = !!opts.isNew;
       error.value = "";
-      // Snapshot the file currently open so a cancel can restore the "current"
-      // marker + back button to it. The cancelled file still enters history
-      // (the backend records it on /api/open), but the UI should land back on
-      // whatever was open before.
-      const prev = { path: filePath.value, name: fileName.value, source: fileSource.value };
-      // Abort any previous in-flight open. The overlay normally blocks
-      // re-triggering, but onMounted restore or rapid calls could overlap.
-      if (loadController.value){ loadController.value.abort(); }
+      invalidateLoad();
+      const my = ++loadSeq;
       const controller = new AbortController();
       loadController.value = controller;
       const signal = controller.signal;
+      // Point the file markers at the incoming file while it loads (footer /
+      // select screen); the table is cleared so no stale rows flash.
+      filePath.value = tb.path; fileName.value = tb.name; fileSource.value = tb.source;
+      columns.value = []; rows.value = []; totalRows.value = 0; encoding.value = "";
       try {
-        const open = await postJSON(API.open, {
-          path,
-          name: opts.displayName || null,
-          source: opts.source || "local",
-        }, { signal });
+        const open = await postJSON(API.open, { path: tb.path, name: null, source: tb.source }, { signal });
+        if (my !== loadSeq) return;
         if (!open.ok) throw new Error(open.error || "open failed");
+        tb.path = open.path;                    // backend-normalized path is authoritative
+        filePath.value = open.path;
         // Only show the loading overlay for files larger than 1 MB — small files
         // load instantly and the flash would be distracting.
         if (open.size && open.size > 1024 * 1024){
           loadingFileSize.value = open.size;
           loadingFile.value = true;
         }
-        // View state to restore: explicit opts.restore wins (e.g. from onMounted);
-        // otherwise fall back to the per-file localStorage snapshot keyed by the
-        // normalized path the backend returned. This way opening from history,
-        // samples, upload, or the system dialog all restore the saved view.
-        const restore = opts.restore || loadFileView(open.path);
-        let d = (restore && restore.delim) || delim.value || ",";
-        const data = await fetchAndApply(path, d, restore && restore.encoding, signal);
-        clearReactive(colOverrides);                            // fresh open: auto widths
-        filePath.value = open.path;
-        fileName.value = opts.displayName || open.name;
-        fileSource.value = opts.source || open.source || "local";
+        const restore = tb.view || loadFileView(open.path);
+        let d = (restore && restore.delim) || ",";
+        const data = await fetchAndApply(open.path, d, restore && restore.encoding, signal);
+        if (my !== loadSeq) return;
+        clearReactive(colOverrides);            // fresh open: auto widths
         delim.value = d;
         if (restore) applyState(restore);
-        phase.value = "view";               // table starts rendering underneath the overlay
-        await nextTick();                   // expensive sync render (colWidths etc.) lands here
+        phase.value = "view";                   // table starts rendering underneath the overlay
+        await nextTick();                       // expensive sync render lands here
         // A cancel that landed during transfer / parse / render was queued behind
         // that work. Yield one frame so it gets dispatched; if it fired, bail back
-        // to selection without unveiling the table.
+        // without unveiling the table.
         if (loadingFile.value){
           await new Promise(r => setTimeout(r, 0));
+          if (my !== loadSeq) return;
           if (signal.aborted){
             loadingFile.value = false;
             if (loadController.value === controller) loadController.value = null;
-            restorePrevOpen(prev, true);   // memory now holds the cancelled file's data
-            phase.value = "select";
-            await refreshHistory();
+            cancelRevert(prevId, tb, isNew);
             return;
           }
         }
-        loadingFile.value = false;          // unveil only once render is done & not cancelled
+        loadingFile.value = false;              // unveil only once render is done & not cancelled
         if (loadController.value === controller) loadController.value = null;
-        viewDirty.value = false;            // in-memory data now matches filePath
+        tb.missing = false; tb.updated = false; tb.lastUsed = Date.now();
+        syncActiveTab();
+        pruneResident();
         if (fileTruncated.value) toast(t('toast.fileTruncated', {size: fmtSize(totalFileSize.value)}));
         await nextTick();
         if (restore && restore.scrollRatio != null) restoreScroll(restore.scrollRatio);
         await refreshHistory();
         saveSession();
-        if (liveWatch.value) startPolling();
+        startPolling();
       } catch (e){
+        if (my !== loadSeq) return;             // superseded — another load/switch owns the refs now
         loadingFile.value = false;
         if (loadController.value === controller) loadController.value = null;
-        if (signal.aborted){
-          // cancelled during fetch (before applyData): memory still holds the
-          // previous file's data — just restore the file-tag markers.
-          restorePrevOpen(prev, false);
-          phase.value = "select";
+        if (signal.aborted || e.name === "AbortError"){
+          cancelRevert(prevId, tb, isNew);
         } else {
+          tb.missing = true;
           toast(t('toast.openFailMsg', {msg: e.message || e}));
-          phase.value = "select";
+          if (isNew) removeTabById(tb.id);
+          revertToTab(prevId);
         }
         await refreshHistory();
       }
     }
 
     function cancelOpen(){
-      // Abort the in-flight open/data request; openFile's catch block then sees
-      // signal.aborted and returns to the file-selection screen silently.
+      // Abort the in-flight open/data request; loadTabData's catch block then
+      // sees signal.aborted and reverts to the previous tab / select screen.
       if (loadController.value){ loadController.value.abort(); }
     }
 
-    function restorePrevOpen(prev, memDirty){
-      // After cancelling an open, point the "current file" markers back at what
-      // was open before. memDirty=true means applyData already ran for the
-      // cancelled file, so the in-memory table no longer matches filePath and
-      // backToView must reload it.
-      filePath.value = prev.path || "";
-      fileName.value = prev.name || "";
-      fileSource.value = prev.source || "";
-      viewDirty.value = memDirty && !!prev.path;
+    function cancelRevert(prevId, tb, isNew){
+      // A cancelled load: refs may already hold the cancelled file's data
+      // (applyData ran). Drop the half-opened tab and put the previous tab's
+      // record back into the refs — its data was snapshotted on switch-away.
+      if (isNew) removeTabById(tb.id);
+      revertToTab(prevId);
+    }
+
+    function removeTabById(id){
+      const i = tabs.value.findIndex(x => x.id === id);
+      if (i >= 0) tabs.value.splice(i, 1);
+    }
+
+    function revertToTab(prevId){
+      const prev = tabs.value.find(x => x.id === prevId);
+      if (prev && prev.columnsArr){
+        activeTabId.value = prev.id;
+        applyTabRecord(prev);
+        phase.value = "view";
+        startPolling();
+      } else if (prev){
+        activeTabId.value = prev.id;
+        loadTabData(prev, { prevId: null, isNew: false });
+      } else if (tabs.value.length){
+        activeTabId.value = tabs.value[0].id;   // keep remaining tabs; land on select
+        phase.value = "select";
+        saveSession();
+      } else {
+        resetToSelect();
+      }
+    }
+
+    function closeTab(id){
+      const idx = tabs.value.findIndex(tb => tb.id === id);
+      if (idx < 0) return;
+      const wasActive = id === activeTabId.value;
+      tabs.value.splice(idx, 1);
+      if (wasActive) invalidateLoad();
+      if (!tabs.value.length){ resetToSelect(); return; }
+      if (wasActive){
+        const next = tabs.value[Math.min(idx, tabs.value.length - 1)];
+        activeTabId.value = null;
+        activateTab(next.id);
+      }
+      saveSession();
+    }
+
+    function resetToSelect(){
+      invalidateLoad();
+      tabs.value = [];
+      activeTabId.value = null;
+      phase.value = "select";
+      filePath.value = ""; fileName.value = ""; fileSource.value = "local";
+      columns.value = []; rows.value = []; totalRows.value = 0; encoding.value = "";
+      search.value = ""; searchInput.value = ""; sortCol.value = null;
+      clearReactive(colFilters); clearReactive(filterInputs);
+      stopPolling();
+      saveSession();
+      refreshHistory();
+    }
+
+    function closeOtherTabs(keepId){
+      const keep = tabs.value.find(tb => tb.id === keepId);
+      if (!keep) return;
+      const wasOtherActive = activeTabId.value !== keepId;
+      tabs.value = [keep];
+      if (wasOtherActive){
+        invalidateLoad();
+        activeTabId.value = null;
+        activateTab(keepId);
+      }
+      saveSession();
+    }
+
+    function pruneResident(){
+      // Keep parsed data resident for the RESIDENT_LIMIT most recently used
+      // tabs (the active tab always counts as one). Older tabs keep their view
+      // state + file signature and are re-fetched on next activation. A
+      // total-bytes cap is the safety valve for very large files.
+      const inactive = tabs.value.filter(tb => tb.columnsArr && tb.id !== activeTabId.value)
+                                 .sort((a, b) => a.lastUsed - b.lastUsed);
+      let bytes = fileSize.value || 0;          // active tab's contribution
+      for (const tb of inactive) bytes += tb.fileSize || 0;
+      const slots = Math.max(0, RESIDENT_LIMIT - 1);
+      for (let i = 0; i < inactive.length; i++){
+        if (inactive.length - i <= slots && bytes <= RESIDENT_BYTES) break;
+        bytes -= inactive[i].fileSize || 0;
+        inactive[i].rows = null; inactive[i].columnsArr = null;
+      }
+    }
+
+    /* ---- tab right-click menu ---- */
+    function onTabWheel(e){
+      // the strip hides its scrollbar; route the wheel to horizontal scrolling
+      const el = e.currentTarget;
+      if (el) el.scrollLeft += (e.deltaY || e.deltaX || 0);
+    }
+    function openTabMenu(tb, ev){
+      tabMenu.id = tb.id;
+      tabMenu.x = Math.min(ev.clientX, window.innerWidth - 190);
+      tabMenu.y = Math.min(ev.clientY, window.innerHeight - 170);
+      showTabMenu.value = true;
+    }
+    function menuTab(){ return tabs.value.find(tb => tb.id === tabMenu.id) || null; }
+    function menuNewWindow(){
+      const tb = menuTab(); showTabMenu.value = false;
+      if (tb) openNewWindow(tb.path, {displayName: tb.name, source: tb.source});
+    }
+    async function menuCopyPath(){
+      const tb = menuTab(); showTabMenu.value = false;
+      if (!tb) return;
+      try { await navigator.clipboard.writeText(tb.path); toast(t('toast.copied')); }
+      catch (e){ toast(t('toast.copyFail')); }
+    }
+    function menuCloseOthers(){ showTabMenu.value = false; if (tabMenu.id != null) closeOtherTabs(tabMenu.id); }
+    function menuCloseAll(){ showTabMenu.value = false; resetToSelect(); }
+    async function onTabMenuRetarget(e){
+      // Right-click while the menu is open: the menu panel and its backdrop
+      // swallow the tab's own contextmenu event. Close the menu, then retarget
+      // it to the tab (if any) under the cursor — right-clicking another tab
+      // switches the menu to that tab.
+      showTabMenu.value = false;
+      await nextTick();                        // let the menu + backdrop unmount first
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const tabEl = el && el.closest ? el.closest(".tab") : null;
+      if (tabEl){
+        const tb = tabs.value.find(t => String(t.id) === tabEl.dataset.id);
+        if (tb) openTabMenu(tb, e);
+      }
+      // not on a tab: menu stays closed, native menu suppressed
+    }
+    function tabTooltip(tb){
+      let s = tb.path || "";
+      if (tb.id !== activeTabId.value && tb.updated) s += "\n" + t('tab.updated');
+      if (tb.id !== activeTabId.value && tb.missing) s += "\n" + t('tab.missing');
+      return s;
     }
 
     async function fetchAndApply(path, d, enc, signal){
       const params = new URLSearchParams({path, delim:d});
       if (enc) params.set("encoding", enc);
       const data = await getJSON(API.data + "?" + params.toString(), { signal });
+      // The active file may have changed while the data was in flight (user
+      // switched tabs): applying now would stomp the other tab's view. Bail as
+      // an abort — callers treat it as "no longer relevant", not an error.
+      if (filePath.value !== path){
+        const err = new Error("stale response");
+        err.name = "AbortError";
+        throw err;
+      }
       // Large files show a cancelable overlay. The data can land in the very
       // instant the user clicks 取消 / hits ESC — but that input is queued behind
       // this task, so signal.aborted is still false here. Without this check the
@@ -986,8 +1246,10 @@ createApp({
         const data = await fetchAndApply(filePath.value, delim.value, null);
         await nextTick();
         restoreScroll(ratio);
+        syncActiveTab();                         // keep the tab record's data + signature current
         toast(t('toast.fileUpdated', {n: data.rowCount.toLocaleString()}));
       } catch (e){
+        if (e.name === "AbortError") return;     // tab switched mid-refresh — not an error
         toast(t('toast.updateFail', {msg: e.message || e}));
       } finally {
         updating.value = false;
@@ -996,21 +1258,47 @@ createApp({
 
     /* ---- real-time polling (near real-time) ---- */
     function startPolling(){
-      stopPolling();
-      pollT = setInterval(checkUpdate, 2000);
+      if (pollT) return;
+      pollT = setInterval(pollOnce, 2000);
     }
     function stopPolling(){ if (pollT){ clearInterval(pollT); pollT = null; } }
-    async function checkUpdate(){
-      if (!filePath.value || phase.value !== "view") return;
-      try {
-        const m = await getJSON(API.meta + "?path=" + encodeURIComponent(filePath.value));
-        lastChecked.value = Date.now();
-        if (!m.exists){ toast(t('toast.fileMissing')); return; }
-        if (m.mtime !== lastMetaMtime || m.size !== lastMetaSize){
-          lastMetaMtime = m.mtime; lastMetaSize = m.size;
-          await reloadPreserving();
-        }
-      } catch (e){ /* transient */ }
+    let pollTick = 0;
+    async function pollOnce(){
+      pollTick++;
+      if (!tabs.value.length) return;
+      syncActiveTab();                           // keep records (esp. file signatures) current
+      // Active tab — full check, same as the single-file era.
+      if (phase.value === "view" && filePath.value && liveWatch.value){
+        const act = activeTab.value;
+        try {
+          const m = await getJSON(API.meta + "?path=" + encodeURIComponent(filePath.value));
+          lastChecked.value = Date.now();
+          if (!m.exists){
+            // toast once per disappearance, not on every poll tick
+            if (act && !act.missing){ act.missing = true; toast(t('toast.fileMissing')); }
+            return;
+          }
+          if (act && act.missing) act.missing = false;   // file reappeared
+          if (m.mtime !== lastMetaMtime || m.size !== lastMetaSize){
+            await reloadPreserving();            // fetchAndApply advances the signature on success
+          }
+        } catch (e){ /* transient */ }
+      }
+      // Inactive tabs — cheap stat every 3rd tick (~6s): mark updated / missing
+      // so the tab shows a dot and refreshes on activation.
+      if (pollTick % 3 !== 0) return;
+      for (const tb of tabs.value){
+        if (tb.id === activeTabId.value) continue;
+        if (tb.view && tb.view.liveWatch === false) continue;   // live watch disabled for this file
+        try {
+          const m = await getJSON(API.meta + "?path=" + encodeURIComponent(tb.path));
+          if (!m.exists){ tb.missing = true; continue; }
+          if (tb.missing) tb.missing = false;
+          // no baseline yet (tab restored from session, never loaded): nothing
+          // to compare against — activation will fetch fresh data anyway.
+          if (tb.metaMtime != null && (m.mtime !== tb.metaMtime || m.size !== tb.metaSize)) tb.updated = true;
+        } catch (e){ /* transient */ }
+      }
     }
 
     /* ===================================================================
@@ -1042,7 +1330,7 @@ createApp({
         if (!r.ok || !j.ok) throw new Error(j.error || t('toast.uploadFail'));
         liveWatch.value = false;
         if (openInNewWindow.value) openNewWindow(j.path, {displayName:j.name, source:"upload"});
-        else await openFile(j.path, {displayName:j.name, source:"upload"});
+        else await openFileAsTab(j.path, {displayName:j.name, source:"upload"});
         toast(t('toast.uploadNoLive'));
       } catch (e){
         toast(t('toast.openFailMsg', {msg: e.message || e}));
@@ -1056,10 +1344,10 @@ createApp({
         if (!r.path){ toast(t('toast.noFile')); return; }
         const useNew = mode === "new" || (mode == null && openInNewWindow.value);
         if (useNew) openNewWindow(r.path, {displayName:r.name, source:"local"});
-        else await openFile(r.path, {displayName:r.name, source:"local"});
+        else await openFileAsTab(r.path, {displayName:r.name, source:"local"});
       } catch (e){ toast(t('toast.sysDialogFail', {msg: e.message || e})); }
     }
-    function openPath(p){ if (p && p.trim()) openFile(p.trim(), {source:"local", displayName:baseName(p.trim())}); }
+    function openPath(p){ if (p && p.trim()) openFileAsTab(p.trim(), {source:"local", displayName:baseName(p.trim())}); }
     async function openDefault(){
       try { const r = await postJSON(API.openNative, {path:filePath.value}); toast(r.ok ? t('toast.opened') : t('toast.openFail')); }
       catch (e){ toast(t('toast.openFail')); }
@@ -1074,22 +1362,17 @@ createApp({
     async function clearHistory(){
       try {
         await postJSON(API.histClear, {});
-        // 清空历史后，当前会话可能仍记着已打开的文件（filePath），与后台已清空
-        // 的历史记录不一致。清掉会话存储并刷新页面，回到干净的「选择文件」状态。
-        try { sessionStorage.removeItem(SESSION_KEY); } catch (e){}
-        location.reload();
+        // 清空历史的同时关闭所有标签页，回到干净的「选择文件」状态。
+        resetToSelect();
+        toast(t('toast.historyCleared'));
       } catch (e){}
     }
     async function removeHistoryItem(path){
       try {
         await postJSON(API.histRemove, {path});
-        // 若移除的正是当前打开的文件，会话缓存仍记着它，与后台已删除的历史不一致。
-        // 清掉会话存储并刷新页面，回到干净的「选择文件」状态。
-        if (path === filePath.value){
-          try { sessionStorage.removeItem(SESSION_KEY); } catch (e){}
-          location.reload();
-          return;
-        }
+        // 若有标签页正打开该文件，一并关闭（激活相邻 tab 或回选择屏）。
+        const hit = tabs.value.find(tb => tb.path === path);
+        if (hit) closeTab(hit.id);
         await refreshHistory();
         toast(t('toast.historyRemoved'));
       } catch (e){}
@@ -1097,19 +1380,10 @@ createApp({
     async function loadSamples(){
       try { samples.value = (await getJSON(API.samples)).samples || []; } catch (e){}
     }
-    function goSelect(){ phase.value = "select"; stopPolling(); refreshHistory(); loadSamples(); saveSession(); }
+    function goSelect(){ syncActiveTab(); phase.value = "select"; refreshHistory(); loadSamples(); saveSession(); }
     function backToView(){
-      if (!filePath.value) return;
-      if (viewDirty.value){
-        // A previous open was cancelled mid-render: memory holds the cancelled
-        // file's data, not filePath's. Reload the current file so the view is right.
-        viewDirty.value = false;
-        openFile(filePath.value, { displayName: fileName.value, source: fileSource.value });
-      } else {
-        phase.value = "view";
-        startPolling();
-        saveSession();
-      }
+      // 从选择屏返回：回到当前活动 tab（数据被 LRU 淘汰时会重新加载）。
+      if (activeTab.value) activateTab(activeTabId.value);
     }
 
     /* ===================================================================
@@ -1139,6 +1413,7 @@ createApp({
         if (loadingFile.value){ cancelOpen(); lastEscTime = 0; return; }
         if (selectedCell.value){ selectedCell.value = null; lastEscTime = 0; return; }
         if (showColsPanel.value){ showColsPanel.value = false; lastEscTime = 0; return; }
+        if (showTabMenu.value){ showTabMenu.value = false; lastEscTime = 0; return; }
         if (phase.value === "select" && filePath.value){ backToView(); lastEscTime = 0; return; }
         // No overlay left to close → rapid double-tap Esc clears all filters & search.
         const now = Date.now();
@@ -1148,6 +1423,16 @@ createApp({
         } else {
           lastEscTime = now;
         }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "`" || e.key === "~")){
+        // Ctrl+~ (physical key Ctrl+`, shifted or not) cycles to the next tab.
+        if (!tabs.value.length) return;
+        e.preventDefault();
+        showTabMenu.value = false;
+        const idx = tabs.value.findIndex(tb => tb.id === activeTabId.value);
+        const next = tabs.value[(idx + 1) % tabs.value.length];
+        if (next && next.id !== activeTabId.value) activateTab(next.id);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f"){
@@ -1173,35 +1458,35 @@ createApp({
         const explicitSource = params.get("source");
 
         // Decide what to open. Priority:
-        //   1. ?path=… in URL → open that file (open-in-new-window case).
-        //   2. sessionStorage phase="view" + filePath → restore file (F5 refresh).
-        //   3. sessionStorage phase="select" (+ filePath kept for "back" btn)
-        //      → stay on select screen.
-        //   4. sessionStorage empty → select screen (brand-new tab).
+        //   1. ?path=… in URL → open that file as the single tab (new window).
+        //   2. sessionStorage tab list → restore tabs (F5 refresh): only the
+        //      active tab is fetched immediately, the rest load on activation.
+        //   3. empty session → select screen (brand-new browser tab).
         const sess = loadSession();
-        let path = null, name = null, source = null;
         if (explicitPath){
-          path = explicitPath;
-          name = explicitName;
-          source = explicitSource;
-        } else if (sess && sess.phase === "view" && sess.filePath){
-          path = sess.filePath;
-          name = sess.fileName;
-          source = sess.fileSource;
-        } else if (sess && sess.phase === "select" && sess.filePath){
-          // Re-hydrate file info so the "back" button works after F5 on the
-          // select screen, but stay on select.
-          filePath.value = sess.filePath;
-          fileName.value = sess.fileName;
-          fileSource.value = sess.fileSource;
-        }
-
-        if (path){
-          const histItem = history.value.find(h => h.path === path);
-          await openFile(path, {
-            displayName: name || (histItem && histItem.name) || undefined,
-            source: source || (histItem && histItem.source) || "local",
+          await openFileAsTab(explicitPath, {
+            displayName: explicitName || undefined,
+            source: explicitSource || "local",
           });
+        } else if (sess && Array.isArray(sess.tabs) && sess.tabs.length){
+          for (const st of sess.tabs){
+            const tb = makeTab(st.path, st.name, st.source);
+            const v = loadFileView(tb.path);
+            if (v) tb.view = v;
+            tabs.value.push(tb);
+          }
+          const idx = Math.max(0, Math.min(sess.tabs.length - 1, sess.activeIndex ?? 0));
+          const at = tabs.value[idx];
+          activeTabId.value = at.id;
+          if (sess.phase === "select"){
+            // F5 on the select screen: stay there, but keep the active tab's
+            // markers so the back button / "current file" tags work.
+            phase.value = "select";
+            filePath.value = at.path; fileName.value = at.name; fileSource.value = at.source;
+            startPolling();
+          } else {
+            await loadTabData(at, { prevId: null, isNew: false });
+          }
         }
         if (phase.value === "loading") phase.value = "select";   // never get stuck on "loading"
       } catch (e){
@@ -1226,10 +1511,10 @@ createApp({
       }
     });
 
-    watch(liveWatch, (on) => {
-      if (phase.value !== "view" || !filePath.value) return;
-      if (on) startPolling(); else stopPolling();
-      scheduleSave();
+    watch(liveWatch, () => {
+      // Per-file preference (persisted via scheduleSave); the poll loop reads
+      // it each tick, so nothing to start/stop here.
+      if (phase.value === "view") scheduleSave();
     });
 
     onUnmounted(() => { stopPolling(); if (ro) ro.disconnect(); window.removeEventListener("keydown", onKey); });
@@ -1250,9 +1535,12 @@ createApp({
       cellText, cellTint, headTint, fmtTime, fmtSize, baseName,
       // actions
       onScroll, toggleSort, hideCol, toggleCol, showAllCols, clearFilters, resetColWidths, setDelim, togglePin, resetColOrder,
-      openCell, copyCell, onCellClick, openFile, cancelOpen, pickAndOpen, openNewWindow, openInNewWindow,
+      openCell, copyCell, onCellClick, openFileAsTab, cancelOpen, pickAndOpen, openNewWindow, openInNewWindow,
       triggerFileInput, onFilePicked, openPath, openDefault, reveal, goSelect, backToView, clearHistory, removeHistoryItem,
       startResize, onHeaderDown, toggleLiveWatch,
+      // multi-tab
+      tabs, activeTabId, activateTab, closeTab, tabTooltip, onTabWheel, onTabMenuRetarget,
+      showTabMenu, tabMenu, openTabMenu, menuNewWindow, menuCopyPath, menuCloseOthers, menuCloseAll,
     };
   }
 }).mount("#app");

@@ -2,10 +2,10 @@
 
 <p><img src="static/icon.png" width="72" height="72" alt="LiveCSV" /></p>
 
-> 一个运行在本机和浏览器里的轻量 CSV / TSV 查看器：自适应表格、按列筛选、全文检索、实时跟随文件更新。离线可用。
+> 一个运行在本机和浏览器里的轻量 CSV / TSV 查看器：自适应表格、按列筛选、全文检索、多标签页、实时跟随文件更新。离线可用。
 >
 > A lightweight, local-first CSV/TSV viewer that runs on your machine and in your browser: adaptive
-> table, per-column filters, full-text search, and live
+> table, per-column filters, full-text search, multi-tab, and live
 > reload when the file changes. Works offline.
 
 [简体中文](#中文) ｜ [English](#english)
@@ -18,6 +18,7 @@
 - **自适应表格**：行高与列宽随内容自适应，点击单元格可展开超长内容；不同列以浅色背景区分，表头颜色略深。
 - **按列筛选 + 全文检索**：每列独立筛选框加顶部全文检索，筛选、列宽、排序状态按窗口持久化，刷新或重启自动恢复。
 - **实时更新**：本地文件被外部程序修改后，页面约 2 秒内自动刷新，保持筛选、排序、隐藏列与滚动位置不变。
+- **多标签页**：同一窗口可打开多个文件，标签统一管理；每个标签独立保留筛选与滚动位置，后台文件变化切回时自动刷新；支持右键菜单与 Ctrl+~ 切换标签。
 - **不锁文件**：以共享只读方式读取并立即释放，Office 等程序可同时读写，互不阻塞。
 - **列布局**：默认显示全部列，可隐藏任意列；拖动表头右边缘调宽、拖动表头本体换位，序号 `#` 列固定；「自适应列宽」按钮一键按内容重排并清除已保存列宽。
 - **记住状态**：刷新页面或关闭重开浏览器都会自动回到上次查看的文件；历史中可一键重开。
@@ -65,7 +66,6 @@ python livecsv.py --log-level INFO           # 日志等级，默认 WARNING（I
 - 快速查看数据库导出、日志、报表等大型数据表。
 - 在 Excel 打开同一文件的同时，用一个不锁文件的只读视图做对照查看。
 - 监控采集器、定时任务持续写入的 CSV，页面自动跟随更新。
-- 多个文件并排比较：用“新窗口打开”为每个文件开一个独立窗口，各自保留筛选与滚动状态。
 
 ### 项目结构
 ```
@@ -106,6 +106,7 @@ LICENSE / README.md     MIT 许可证 / 项目说明
 - **Adaptive table**: row height and column width adapt to content; click a cell to expand long values. Columns use light tints with slightly stronger headers.
 - **Per-column filters + full-text search**: each column has its own filter box plus a global search; filter, width, and sort state is saved per window and restored on reload or restart.
 - **Live updates**: when the local file is edited by another program, the view refreshes within ~2s, preserving filters, sort, hidden columns, and scroll position.
+- **Multi-tab**: open several files at once and manage them in tabs; each tab keeps its own filters and scroll position and refreshes on switch when its file changed; right-click menu and Ctrl+~ to cycle tabs.
 - **Non-locking reads**: files are opened read-only and released immediately, so Office and other tools can read/write them concurrently.
 - **Column layout**: all columns show by default and any can be hidden; drag a header's right edge to resize or the header itself to reorder, with the `#` column fixed; an "Auto-fit widths" button resets to content-based widths and clears saved widths.
 - **Remembers state**: refresh or close and reopen the browser and it returns to the last file; previously opened files reopen from history in one click.
@@ -148,8 +149,6 @@ Start the server in the background and open the browser automatically, with no t
 - Keep a non-locking read-only view side-by-side while Excel has the file open.
 - Watch a CSV written continuously by collectors or scheduled jobs and let the
   page follow updates automatically.
-- Compare several files: "open in new window" gives each file its own window with
-  independent filters and scroll position.
 
 ### Project Structure
 ```

@@ -33,16 +33,6 @@
   .t-group{display:flex;align-items:center;gap:8px}
   .t-spacer{flex:1}
   .t-divider{width:1px;align-self:stretch;background:var(--border);margin:0 4px}
-  .file-tag{display:flex;align-items:center;gap:8px;background:var(--accent-soft);color:var(--accent-hover);
-    border:1px solid #cfe0ff;padding:6px 12px;border-radius:999px;font-weight:600;cursor:pointer;max-width:380px;
-    transition:background .15s,border-color .15s}
-  .file-tag:hover{border-color:var(--accent);background:#dde9ff}
-  .file-tag.file-tag-empty{background:var(--surface-2);color:var(--muted-2);border-color:var(--border);font-weight:500;cursor:default}
-  .file-tag.file-tag-empty:hover{background:var(--surface-2);border-color:var(--border)}
-  .file-tag .fname{min-width:0}
-  .file-tag .ftag-chevron{opacity:.55;flex-shrink:0;transition:opacity .15s,transform .15s ease}
-  .file-tag:hover .ftag-chevron{opacity:1}
-  .file-tag.in-select .ftag-chevron{transform:rotate(-90deg)}
   .badge{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);
     color:var(--muted);padding:5px 10px;border-radius:999px;font-variant-numeric:tabular-nums}
   .badge b{color:var(--text)}
@@ -128,7 +118,6 @@
     margin-right:6px;vertical-align:middle;line-height:1.5}
   .src-tag.local{background:#e8f5e9;color:#1b7a3d}
   .src-tag.upload{background:#fff3e0;color:#b06a00}
-  .file-tag .src-tag{background:#ffffff99;color:var(--accent-hover);margin-left:2px;margin-right:0}
   .samples{display:flex;gap:8px;flex-wrap:wrap}
   .chip{padding:6px 12px;border:1px solid var(--border-strong);border-radius:999px;cursor:pointer;background:var(--surface);font-size:12px}
   .chip:hover{border-color:var(--accent);color:var(--accent)}
@@ -232,3 +221,43 @@
     font-size:11.5px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
   .fpath{max-width:60ch}
   .ftrunc{color:var(--amber);font-weight:600}
+
+  /* ---------- tabs (inline pills in the toolbar, one per open file) ---------- */
+  .t-tabs{min-width:0;flex:0 1 auto}
+  .tabstrip{display:flex;align-items:center;gap:4px;min-width:0;max-width:56vw;
+    overflow-x:auto;scrollbar-width:none}
+  .tabstrip::-webkit-scrollbar{display:none}
+  .tab{flex:0 1 auto;max-width:190px;min-width:0;height:30px;display:inline-flex;align-items:center;gap:7px;
+    padding:0 6px 0 12px;border:1px solid transparent;border-radius:999px;background:transparent;
+    color:var(--text);opacity:.72;cursor:pointer;user-select:none;white-space:nowrap;
+    transition:background .12s,opacity .12s,border-color .12s}
+  .tab:hover{background:var(--surface-2);opacity:1}
+  .tab.active{background:var(--accent-soft);border-color:#cfe0ff;color:var(--accent-hover);font-weight:600;opacity:1}
+  .tab.active:hover{background:#dde9ff}
+  .tab .tname{flex:1;min-width:0;font-size:12.5px}
+  .tab.missing .tname{color:var(--muted-2);text-decoration:line-through}
+  .tab.active.missing .tname{color:var(--accent-hover);text-decoration:line-through dotted}
+  .tabclose{border:none;background:transparent;color:var(--muted-2);cursor:pointer;
+    width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    flex-shrink:0;padding:0;opacity:.55;transition:.12s}
+  .tab:hover .tabclose{opacity:1}
+  .tabclose:hover{background:var(--hover-bg);color:var(--text)}
+  .tab.active .tabclose{opacity:1;color:var(--accent-hover)}
+  .tab.active .tabclose:hover{background:#ffffff99;color:var(--accent-hover)}
+  .tdot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;
+    animation:tabdot 1.6s ease infinite}
+  .tdot.miss{background:var(--red)}
+  @keyframes tabdot{50%{opacity:.35}}
+  .tabnew{border:none;background:transparent;color:var(--muted);cursor:pointer;width:26px;height:26px;
+    border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
+    transition:.12s;padding:0}
+  .tabnew:hover{background:var(--accent-soft);color:var(--accent)}
+
+  /* ---------- tab right-click menu ---------- */
+  .tabmenu{position:fixed;z-index:60;min-width:172px;background:var(--surface);border:1px solid var(--border);
+    border-radius:10px;box-shadow:var(--shadow-lg);padding:4px}
+  .tmi{padding:7px 12px;border-radius:7px;font-size:12.5px;cursor:pointer;color:var(--text);white-space:nowrap}
+  .tmi:hover{background:var(--surface-2)}
+  .tmi.danger{color:var(--red)}
+  .tmi.danger:hover{background:#fdecec}
+  .tmi-sep{height:1px;background:var(--border);margin:4px 8px}
