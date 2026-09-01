@@ -56,9 +56,9 @@
   .search{position:relative;display:flex;align-items:center}
   .search input{padding:7px 26px 7px 30px;border:1px solid var(--border-strong);border-radius:8px;width:230px;
     outline:none;transition:.12s}
-  .search svg{position:absolute;left:9px;opacity:.5}
+  .search > svg{position:absolute;left:9px;opacity:.5}
   .search-clear{position:absolute;right:5px;border:none;background:var(--surface-2);color:var(--muted);
-    cursor:pointer;font-size:15px;line-height:1;width:18px;height:18px;border-radius:4px;display:flex;
+    cursor:pointer;width:18px;height:18px;border-radius:4px;display:flex;
     align-items:center;justify-content:center;transition:.12s;padding:0}
   .search-clear:hover{background:var(--border);color:var(--text)}
   .sel{padding:7px 8px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);cursor:pointer;outline:none}
@@ -100,7 +100,8 @@
     cursor:pointer;padding:2px 6px;border-radius:6px;font-weight:400}
   .section-title .clear-link:hover{background:var(--accent-soft)}
   .hist .remove-btn{border:none;background:transparent;cursor:pointer;color:var(--muted-2);
-    font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;flex-shrink:0}
+    width:18px;height:18px;padding:0;border-radius:4px;flex-shrink:0;
+    display:inline-flex;align-items:center;justify-content:center}
   .hist .remove-btn:hover{background:var(--hover-bg);color:var(--red)}
   .hist-list{display:flex;flex-direction:column;gap:6px}
   .hist{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;
@@ -137,14 +138,14 @@
     color:var(--text);flex:1 1 auto;min-width:0}
   .sortarrow{font-size:10px;color:var(--accent);width:10px}
   .sortarrow.muted{color:var(--muted-2)}
-  .hidebtn{border:none;background:transparent;cursor:pointer;color:var(--muted-2);font-size:15px;line-height:1;
-    padding:0 2px;border-radius:4px;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;min-height:16px}
+  .hidebtn{border:none;background:transparent;cursor:pointer;color:var(--muted-2);
+    width:16px;height:16px;padding:0;border-radius:4px;margin-left:auto;display:inline-flex;align-items:center;justify-content:center}
   .hidebtn:hover{background:var(--hover-bg);color:var(--red)}
   .hfilter-wrap{position:relative;width:100%}
   .hfilter{width:100%;border:1px solid var(--border);border-radius:6px;padding:3px 22px 3px 6px;font-size:12px;outline:none;background:#ffffffcc}
   .hfilter:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft);background:#fff}
   .hfilter-clear{position:absolute;right:3px;top:50%;transform:translateY(-50%);border:none;background:var(--surface-2);
-    color:var(--muted);cursor:pointer;font-size:13px;line-height:1;width:16px;height:16px;border-radius:4px;display:flex;
+    color:var(--muted);cursor:pointer;width:16px;height:16px;border-radius:4px;display:flex;
     align-items:center;justify-content:center;transition:.12s;padding:0}
   .hfilter-clear:hover{background:var(--border);color:var(--text)}
   .cell{font-size:12.5px;line-height:20px;white-space:pre;text-overflow:ellipsis;cursor:cell;user-select:none}
@@ -194,7 +195,8 @@
   .modal .mhead .mtag{background:var(--accent-soft);color:var(--accent-hover);padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
   .modal .mbody{padding:16px 18px;overflow:auto;font-family:var(--mono);font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
   .modal .mfoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--border)}
-  .xbtn{margin-left:auto;border:none;background:transparent;font-size:20px;line-height:1;cursor:pointer;color:var(--muted);padding:2px 6px;border-radius:6px}
+  .xbtn{margin-left:auto;border:none;background:transparent;cursor:pointer;color:var(--muted);
+    width:26px;height:26px;padding:0;border-radius:6px;display:inline-flex;align-items:center;justify-content:center}
   .xbtn:hover{background:var(--hover-bg);color:var(--text)}
 
   /* modal transition (overlay fade + modal scale) */
@@ -231,9 +233,9 @@
     padding:0 6px 0 12px;border:1px solid transparent;border-radius:999px;background:transparent;
     color:var(--text);opacity:.72;cursor:pointer;user-select:none;white-space:nowrap;
     transition:background .12s,opacity .12s,border-color .12s}
-  .tab:hover{background:var(--surface-2);opacity:1}
+  .tab:hover{background:var(--surface-2);border-color:var(--accent);opacity:1}
   .tab.active{background:var(--accent-soft);border-color:#cfe0ff;color:var(--accent-hover);font-weight:600;opacity:1}
-  .tab.active:hover{background:#dde9ff}
+  .tab.active:hover{background:#dde9ff;border-color:var(--accent)}
   .tab .tname{flex:1;min-width:0;font-size:12.5px}
   .tab.missing .tname{color:var(--muted-2);text-decoration:line-through}
   .tab.active.missing .tname{color:var(--accent-hover);text-decoration:line-through dotted}
@@ -248,10 +250,10 @@
     animation:tabdot 1.6s ease infinite}
   .tdot.miss{background:var(--red)}
   @keyframes tabdot{50%{opacity:.35}}
-  .tabnew{border:none;background:transparent;color:var(--muted);cursor:pointer;width:26px;height:26px;
+  .tabnew{border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;width:26px;height:26px;
     border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
     transition:.12s;padding:0}
-  .tabnew:hover{background:var(--accent-soft);color:var(--accent)}
+  .tabnew:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 
   /* ---------- tab right-click menu ---------- */
   .tabmenu{position:fixed;z-index:60;min-width:172px;background:var(--surface);border:1px solid var(--border);
