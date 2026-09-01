@@ -25,3 +25,6 @@ Thumbs.db
 
 # Early design drafts (internal, not part of the shipped app)
 early-design/
+
+# Local docs/notes (internal)
+docs/
